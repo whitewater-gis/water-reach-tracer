@@ -60,4 +60,5 @@ target/
 # Jupyter
 .ipynb_checkpoints/
 
+# JetBrains
 .idea/
