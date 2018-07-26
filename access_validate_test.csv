@@ -1,0 +1,8 @@
+,OBJECTID,reach_id,type,collection_method,name,side_of_river,notes,created_user,created_date,last_edited_user,last_edited_date,SHAPE
+0,139,1,putin,unknown,,,does not have putin and takout,,,,,"{'x': -124.43237137899996, 'y': 48.232620584000074, 'z': 0, 'spatialReference': {'wkid': 4269, 'latestWkid': 4269, 'vcsWkid': 115700, 'latestVcsWkid': 115700}}"
+1,140,2,putin,unknown,,,accesses not coincident with hydrolines,,,,,"{'x': -124.42956312199999, 'y': 48.22291439500003, 'z': 0, 'spatialReference': {'wkid': 4269, 'latestWkid': 4269, 'vcsWkid': 115700, 'latestVcsWkid': 115700}}"
+2,141,2,takeout,unknown,,,accesses not coincident with hydrolines,,,,,"{'x': -124.41955916399996, 'y': 48.22681269800006, 'z': 0, 'spatialReference': {'wkid': 4269, 'latestWkid': 4269, 'vcsWkid': 115700, 'latestVcsWkid': 115700}}"
+3,142,3,putin,unknown,,,putin not upstream of takeout,,,,,"{'x': -124.40874668999999, 'y': 48.24027845200004, 'z': 0, 'spatialReference': {'wkid': 4269, 'latestWkid': 4269, 'vcsWkid': 115700, 'latestVcsWkid': 115700}}"
+4,143,3,takeout,unknown,,,putin not upstream of takeout,,,,,"{'x': -124.40072484699999, 'y': 48.24124282200006, 'z': 0, 'spatialReference': {'wkid': 4269, 'latestWkid': 4269, 'vcsWkid': 115700, 'latestVcsWkid': 115700}}"
+5,144,4,putin,unknown,,,valid,,,,,"{'x': -124.40996530999996, 'y': 48.225930719000075, 'z': 0, 'spatialReference': {'wkid': 4269, 'latestWkid': 4269, 'vcsWkid': 115700, 'latestVcsWkid': 115700}}"
+6,145,4,takeout,unknown,,,valid,,,,,"{'x': -124.39480144999999, 'y': 48.23621071700006, 'z': 0, 'spatialReference': {'wkid': 4269, 'latestWkid': 4269, 'vcsWkid': 115700, 'latestVcsWkid': 115700}}"
