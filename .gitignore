@@ -58,4 +58,6 @@ docs/_build/
 target/
 
 # Jupyter
-.ipynb_notebooks
+.ipynb_checkpoints/
+
+.idea/
