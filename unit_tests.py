@@ -7,6 +7,10 @@ from reach_tools import *
 
 class ReachLDub(unittest.TestCase):
     reach_id = 2156
+    putin_x = -121.634402
+    putin_y = 45.794848
+    takeout_x = -121.645582
+    takeout_y = 45.718817
 
     def test_class_init(self):
         ldub = Reach(self.reach_id)
@@ -34,6 +38,22 @@ class ReachLDub(unittest.TestCase):
     def test_get_from_aw(self):
         ldub = Reach.get_from_aw(self.reach_id)
         self.assertTrue(ldub.river_name == 'Little White Salmon')
+
+    def test_get_accesses_by_type(self):
+        ldub = Reach.get_from_aw(self.reach_id)
+        putin = ldub._get_accesses_by_type('putin')[0]
+        self.assertTupleEqual((self.putin_x, self.putin_y), (putin.geometry.x, putin.geometry.y))
+
+    def test_putin(self):
+        ldub = Reach.get_from_aw(self.reach_id)
+        putin = ldub.putin
+        self.assertTupleEqual((self.putin_x, self.putin_y), (putin.geometry.x, putin.geometry.y))
+
+    def test_takeout(self):
+        ldub = Reach.get_from_aw(self.reach_id)
+        takeout = ldub.takeout
+        self.assertTupleEqual((self.takeout_x, self.takeout_y), (takeout.geometry.x, takeout.geometry.y))
+
 
 
 class AccessPutin(unittest.TestCase):

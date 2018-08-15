@@ -637,24 +637,27 @@ class Reach(pd.Series):
 
     @classmethod
     def get_from_arcgis(cls, reach_layer, reach_id):
+
         if type(reach_layer) != ReachFeatureLayer:
             raise Exception('reach_layer must be a ReachFeatureLayer')
+
         response = reach_layer.query_by_reach_id(reach_id)
         # TODO: finish implementing get_from_arcgis method
 
     def _get_accesses_by_type(self, access_type):
-        # TODO: update _get_accesses_by_type to support the subclassed Series paradigm
-        if access_type != 'putin' or access_type != 'takeout' or access_type != 'intermediate':
+
+        # check to ensure the correct access type is being specified
+        if access_type != 'putin' and access_type != 'takeout' and access_type != 'intermediate':
             raise Exception('access type must be either "putin", "takeout" or "intermediate"')
-        else:
-            self._type = access_type
-        return [access for access in self.access_list if access.type == access_type]
+
+        # return list of all accesses of specified type
+        return [pt for pt in self.reach_points if pt.subtype == access_type and pt.point_type == 'access']
 
     def _set_putin_takeout(self, access, access_type):
         # TODO: update _set_putin_takeout to support the subclassed Series paradigm
         if type(access) != ReachPoint:
             raise Exception('{} access must be an instance of ReachPoint object type'.format(access_type))
-        self.access_list = [access for access in self.access_list if access.type != access_type]
+        self.access_list = [pt for pt in self.access_list if pt.subtype != access_type]
         access.set_type(access_type)
         self.access_list.append(access)
 
