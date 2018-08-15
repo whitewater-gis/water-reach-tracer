@@ -591,7 +591,6 @@ class Reach(pd.Series):
         self._parse_difficulty_string(str(self.difficulty))
 
         # ensure putin coordinates are present, and if so, add the put-in point to the points list
-        # TODO: create and add putin as ReachPoint object instance to reach points
         if reach_info['plon'] is not None and reach_info['plat'] is not None:
             self.reach_points.append(
                 ReachPoint(
@@ -606,8 +605,7 @@ class Reach(pd.Series):
                 )
             )
 
-        # ensure take-out coordinates are present, and if so, add take-out point to points list\
-        # TODO: create and add takeout as ReachPoint object instance to reach points
+        # ensure take-out coordinates are present, and if so, add take-out point to points list
         if reach_info['tlon'] is not None and reach_info['tlat'] is not None:
             self.reach_points.append(
                 ReachPoint(
