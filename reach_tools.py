@@ -1,4 +1,3 @@
-
 """
 author:     Joel McCune (joel.mccune+gis@gmail.com)
 dob:        03 Dec 2014
@@ -23,7 +22,7 @@ from arcgis.features import FeatureLayer, Feature
 from arcgis.gis import GIS, Item
 import pandas as pd
 import re
-import html2text
+from html2text import html2text
 from uuid import uuid4
 import shapely.ops
 import shapely.geometry
@@ -473,7 +472,7 @@ class Reach(pd.Series):
         self['validated'] = None  # boolean
         self['validated_by'] = ''
         self['hydroline'] = None
-        self['reach_points'] = pd.DataFrame()
+        self['reach_points'] = []
 
     @property
     def centroid(self):
@@ -487,9 +486,8 @@ class Reach(pd.Series):
         else:
             return None
 
-    @staticmethod
     def _download_raw_json_from_aw(self):
-        url = requests.get('https://www.americanwhitewater.org/content/River/detail/id/{}/.json'.format(self.reach_id))
+        url = 'https://www.americanwhitewater.org/content/River/detail/id/{}/.json'.format(self.reach_id)
 
         attempts = 0
         status_code = 0
@@ -595,12 +593,23 @@ class Reach(pd.Series):
         # ensure putin coordinates are present, and if so, add the put-in point to the points list
         # TODO: create and add putin as ReachPoint object instance to reach points
         if reach_info['plon'] is not None and reach_info['plat'] is not None:
-            putin = ReachPoint()
+            self.reach_points.append(
+                ReachPoint(
+                    reach_id=self.reach_id,
+                    geometry=Point(
+                        x=float(reach_info['plon']),
+                        y=float(reach_info['plat']),
+                        spatialReference={'wkid': 4326}
+                    ),
+                    point_type='access',
+                    subtype='putin'
+                )
+            )
 
         # ensure take-out coordinates are present, and if so, add take-out point to points list\
         # TODO: create and add takeout as ReachPoint object instance to reach points
         if reach_info['tlon'] is not None and reach_info['tlat'] is not None:
-            self.points.append(
+            self.reach_points.append(
                 ReachPoint(
                     reach_id=self.reach_id,
                     point_type='access',
@@ -615,8 +624,18 @@ class Reach(pd.Series):
 
     @classmethod
     def get_from_aw(cls, reach_id):
-        # TODO: implement get_from_aw method for Reach
-        return None
+
+        # create instance of reach
+        reach = cls(reach_id)
+
+        # download raw JSON from American Whitewater
+        raw_json = reach._download_raw_json_from_aw()
+
+        # parse data out of the AW JSON
+        reach._parse_json(raw_json)
+
+        # return the result
+        return reach
 
     @classmethod
     def get_from_arcgis(cls, reach_layer, reach_id):
