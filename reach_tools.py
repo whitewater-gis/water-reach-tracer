@@ -597,7 +597,7 @@ class Reach(pd.Series):
         self.length = float(self._validate_aw_json(reach_info, 'length'))
 
         # save the update datetime as a true datetime object
-        self.update_datetime = datetime.datetime.strptime(reach_info['edited'], '%Y-%m-%d %H:%M:%S')
+        self.update_aw = datetime.datetime.strptime(reach_info['edited'], '%Y-%m-%d %H:%M:%S')
 
         # process difficulty
         self.difficulty = self._validate_aw_json(reach_info, 'class')
