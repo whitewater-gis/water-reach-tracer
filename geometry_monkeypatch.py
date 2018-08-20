@@ -1,4 +1,4 @@
-from arcgis.geometry import Geometry, Point, Polyline
+from arcgis.geometry import Geometry, Point, Polyline, find_transformation, project
 from arcgis.geometry._types import HASARCPY, HASSHAPELY
 from shapely import ops
 
@@ -41,7 +41,7 @@ def snap_to_line(self, polyline_geometry):
         raise Warning('The spatial reference for the point to be snapped to a line is not defined.')
     if polyline_geometry.spatial_reference is None:
         raise Warning('The spatial reference of the line being snapped to is not defined.')
-    if not self.spatial_reference != polyline_geometry.spatial_reference:
+    if self.spatial_reference != polyline_geometry.spatial_reference:
         raise Exception('The spatial reference for the point and the line are not the same.')
 
     if HASARCPY:
@@ -75,7 +75,7 @@ def split_at_point(self, point_geometry):
         raise Warning('The spatial reference for the line to be split is not defined.')
     if point_geometry.spatial_reference is None:
         raise Warning('The spatial reference of the point defining the split location is not defined.')
-    if not self.spatial_reference != point_geometry.spatial_reference:
+    if self.spatial_reference != point_geometry.spatial_reference:
         raise Exception('The spatial reference for the line and point are not the same.')
 
     #     if HASARCPY:
@@ -104,7 +104,43 @@ def trim_at_point(self, point_geometry):
     return self.split_at_point(point_geometry)[0]
 
 
+def match_spatial_reference(self, match_geometry):
+    """
+    Match the spatial reference of the calling geometry to another geometry.
+    Typically used to get data into single spatial reference for subsequent
+    analysis.
+    :param match_geometry: Required arcgis.geometry.Geometry
+        Another target geometry to ensure the source spatial reference matches to.
+    :return: arcgis.geometry.Geometry
+        Same geometry projected to new coordinate system.
+    """
+    # pull the wkid off the inputs
+    wkid_in = self.spatial_reference['wkid']
+    wkid_out = match_geometry.spatial_reference['wkid']
+
+    # if the spatial references match, don't do anything
+    if wkid_in == wkid_out:
+        return self
+
+    # get the best applicable transformation, if needed
+    transformation_list = find_transformation(wkid_in, wkid_out)['transformations']
+
+    # if a transformation IS needed, project using it
+    if len(transformation_list):
+        out_geom = project([self], wkid_in, wkid_out, transformation_list[0])[0]
+
+    # if a transformation IS NOT needed, project without
+    else:
+        out_geom = project([self], wkid_in, wkid_out)[0]
+
+    # add the spatial reference to the geometry, since it does not have it in the response
+    out_geom.spatial_reference = match_geometry.spatial_reference
+
+    return out_geom
+
+
 Geometry.from_shapely = from_shapely
 Geometry.snap_to_line = snap_to_line
 Geometry.split_at_point = split_at_point
-Geometry.trim_at_point = trim_at_point\
+Geometry.trim_at_point = trim_at_point
+Geometry.match_spatial_reference = match_spatial_reference
