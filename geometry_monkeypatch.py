@@ -1,4 +1,4 @@
-from arcgis.geometry import Geometry, Point, Polyline, find_transformation, project
+from arcgis.geometry import Geometry, Point, Polyline, find_transformation, project, SpatialReference
 from arcgis.geometry._types import HASARCPY, HASSHAPELY
 from shapely import ops
 
@@ -104,6 +104,45 @@ def trim_at_point(self, point_geometry):
     return self.split_at_point(point_geometry)[0]
 
 
+def project_as(self, output_spatial_reference):
+    """
+    Project the geometry to another spatial reference, and automatically
+    applying a transformation if necessary.
+    :param output_spatial_reference: Required - SpatialReference
+        Spatial reference object defining the output spatial reference.
+    :return: Geometry object in new spatial reference.
+    """
+    # get the wkid for the input and output
+    if type(output_spatial_reference) == int:
+        wkid_out = output_spatial_reference
+    elif type(output_spatial_reference) == SpatialReference:
+        wkid_out = SpatialReference['wkid']
+    else:
+        raise Exception('Valid output spatial reference must be provided.')
+
+    wkid_in = wkid_in = self.spatial_reference['wkid']
+
+    # if the spatial references match, don't do anything
+    if wkid_in == wkid_out:
+        return self
+
+    # get the best applicable transformation, if needed
+    transformation_list = find_transformation(wkid_in, wkid_out)['transformations']
+
+    # if a transformation IS needed, project using it
+    if len(transformation_list):
+        out_geom = project([self], wkid_in, wkid_out, transformation_list[0])[0]
+
+    # if a transformation IS NOT needed, project without
+    else:
+        out_geom = project([self], wkid_in, wkid_out)[0]
+
+    # add the spatial reference to the geometry, since it does not have it in the response
+    out_geom.spatial_reference = SpatialReference(wkid=wkid_out)
+
+    return out_geom
+
+
 def match_spatial_reference(self, match_geometry):
     """
     Match the spatial reference of the calling geometry to another geometry.
@@ -143,4 +182,5 @@ Geometry.from_shapely = from_shapely
 Geometry.snap_to_line = snap_to_line
 Geometry.split_at_point = split_at_point
 Geometry.trim_at_point = trim_at_point
+Geometry.project_as = project_as
 Geometry.match_spatial_reference = match_spatial_reference
