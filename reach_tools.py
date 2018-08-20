@@ -85,59 +85,68 @@ class WATERS(object):
         coordinates = response_json['output']['end_point']['coordinates']
 
         return {
-            "geometry": Geometry(x=coordinates[0], y=coordinates[1], spatialReference={"wkid": 4269}),
+            "geometry": Geometry(x=coordinates[0], y=coordinates[1], spatialReference={"wkid": 4326}),
             "measure": response_json["output"]["ary_flowlines"][0]["fmeasure"],
             "id": response_json["output"]["ary_flowlines"][0]["comid"]
         }
 
     @staticmethod
-    def _get_epa_upstreamdownstream_response(putin_snapped_epa_point):
+    def _get_epa_downstream_navigation_response(putin_snapped_epa_point):
         """
-        Make a call to the WATERS Upstream/Downstream Search Service and trace downstream using the putin snapped using
+        Make a call to the WATERS Navigation Service and trace downstream using the putin snapped using
             the EPA service with keys for geometry, measure and feature id.
         :param putin_snapped_epa_point: Dictionary with geometry, measure and id delineating the putin snapped to the
             closest NHDPlus hydroline.
         :return: Raw response object from REST call.
         """
 
-        url = "https://ofmpub.epa.gov/waters10/UpstreamDownStream.Service"
+        # url for the REST call
+        url = "http://ofmpub.epa.gov/waters10/Navigation.Service"
 
-        query_string = {
+        # input parameters as documented at https://www.epa.gov/waterdata/navigation-service
+        queryString = {
             "pNavigationType": "DM",
             "pStartComID": putin_snapped_epa_point["id"],
             "pStartMeasure": putin_snapped_epa_point["measure"],
-            "pFlowlinelist": True,
-            "pTraversalSummary": True,
+            "pMaxDistanceKm": 5000,
+            "pReturnFlowlineAttr": True,
             "f": "json"
         }
 
+        # since requests don't always work, enable repeated tries up to 10
         attempts = 0
         status_code = 0
 
         while attempts < 10 and status_code != 200:
-            response = requests.get(url, query_string)
+
+            # make the actual response to the REST endpoint
+            resp = requests.get(url, queryString)
+
+            # increment the attempts and pull out the status code
             attempts = attempts + 1
-            status_code = response.status_code
+            status_code = resp.status_code
+
+            # if the status code is anything other than 200, provide a message of status
             if status_code != 200:
                 print('Attempt {:02d} failed with status code {}'.format(attempts, status_code))
 
-        return response
+        return resp
 
     @staticmethod
-    def _epa_trace_resp_to_esri_geom(trace_response):
+    def _epa_navigation_response_to_esri_polyline(navigation_response):
         """
         From the raw response returned from the trace create a single ArcGIS Python API Line Geometry object.
-        :param trace_response: Raw trace response received from the REST endpoint.
+        :param navigation_response: Raw trace response received from the REST endpoint.
         :return: Single continuous ArcGIS Python API Line Geometry object.
         """
-        resp_json = trace_response.json()
+        resp_json = navigation_response.json()
 
         # if any flowlines were found, combine all the coordinate pairs into a single continuous line
-        if resp_json['output']['flowlines_traversed']:
+        if resp_json['output']['ntNavResultsStandard']:
 
             # extract the dict descriptions of the geometries and convert to Shapely geometries
             flowline_list = [shapely.geometry.shape(flowline['shape'])
-                             for flowline in resp_json['output']['flowlines_traversed']]
+                             for flowline in resp_json['output']['ntNavResultsStandard']]
 
             # use Shapely to combine all the lines into a single line
             flowline = shapely.ops.linemerge(flowline_list)
@@ -149,7 +158,7 @@ class WATERS(object):
         else:
             raise TraceException('the tracing operation did not find any hydrolines')
 
-    def _epa_trace_downstream(self, putin_snapped_epa_point):
+    def get_downstream_trace_polyline(self, putin_snapped_epa_point):
         """
         Make a call to the WATERS Upstream/Downstream Search Service and trace downstream using the putin snapped using
             the EPA service with keys for geometry, measure and feature id.
@@ -157,8 +166,8 @@ class WATERS(object):
             closest NHDPlus hydroline.
         :return: Single continuous ArcGIS Python API Line Geometry object.
         """
-        resp = self._get_epa_upstreamdownstream_response(putin_snapped_epa_point)
-        return self._epa_trace_resp_to_esri_geom(resp)
+        resp = self._get_epa_downstream_navigation_response(putin_snapped_epa_point)
+        return self._epa_navigation_response_to_esri_polyline(resp)
 
 
 class ReachAccessesSDF(SDF):
@@ -655,15 +664,27 @@ class Reach(pd.Series):
 
     def _set_putin_takeout(self, access, access_type):
         # TODO: update _set_putin_takeout to support the subclassed Series paradigm
+
+        # enforce correct objec type
         if type(access) != ReachPoint:
             raise Exception('{} access must be an instance of ReachPoint object type'.format(access_type))
-        self.access_list = [pt for pt in self.access_list if pt.subtype != access_type]
-        access.set_type(access_type)
-        self.access_list.append(access)
+
+        # check to ensure the correct access type is being specified
+        if access_type != 'putin' and access_type != 'takeout':
+            raise Exception('access type must be either "putin" or "takeout"')
+
+        # update the list to NOT include the point we are adding
+        self.access_list = [pt for pt in self.reach_points if pt.subtype != access_type]
+
+        # ensure the new point being added is the right type
+        access.point_type = 'access'
+        access.subtype = access_type
+
+        # add it to the reach point list
+        self.reach_points.append(access)
 
     @property
     def putin(self):
-        # TODO: update putin to support the subclassed Series paradigm
         access_list = self._get_accesses_by_type('putin')
         if len(access_list) > 0:
             return access_list[0]
@@ -675,7 +696,6 @@ class Reach(pd.Series):
 
     @property
     def takeout(self):
-        # TODO: update takeout to support the subclassed Series paradigm
         access_list = self._get_accesses_by_type('takeout')
         if len(access_list) > 0:
             return access_list[0]
@@ -687,7 +707,6 @@ class Reach(pd.Series):
 
     @property
     def intermediate_accesses(self):
-        # TODO: update intermediate_accesses to support the subclassed Series paradigm
         access_list = self._get_accesses_by_type('intermediate')
         if len(access_list) > 0:
             return access_list
