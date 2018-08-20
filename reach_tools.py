@@ -91,12 +91,14 @@ class WATERS(object):
         }
 
     @staticmethod
-    def _get_epa_downstream_navigation_response(putin_snapped_epa_point):
+    def _get_epa_downstream_navigation_response(putin_epa_reach_id, putin_epa_measure):
         """
         Make a call to the WATERS Navigation Service and trace downstream using the putin snapped using
             the EPA service with keys for geometry, measure and feature id.
-        :param putin_snapped_epa_point: Dictionary with geometry, measure and id delineating the putin snapped to the
-            closest NHDPlus hydroline.
+        :param putin_epa_reach_id: Required - Integer or String
+            Reach id of EPA NHD Plus reach to start from.
+        :param putin_epa_measure: Required - Integer
+            Measure along specified reach to start from.
         :return: Raw response object from REST call.
         """
 
@@ -106,8 +108,8 @@ class WATERS(object):
         # input parameters as documented at https://www.epa.gov/waterdata/navigation-service
         queryString = {
             "pNavigationType": "DM",
-            "pStartComID": putin_snapped_epa_point["id"],
-            "pStartMeasure": putin_snapped_epa_point["measure"],
+            "pStartComID": putin_epa_reach_id,
+            "pStartMeasure": putin_epa_measure,
             "pMaxDistanceKm": 5000,
             "pReturnFlowlineAttr": True,
             "f": "json"
@@ -158,15 +160,17 @@ class WATERS(object):
         else:
             raise TraceException('the tracing operation did not find any hydrolines')
 
-    def get_downstream_trace_polyline(self, putin_snapped_epa_point):
+    def get_downstream_trace_polyline(self, putin_epa_reach_id, putin_epa_measure):
         """
         Make a call to the WATERS Upstream/Downstream Search Service and trace downstream using the putin snapped using
             the EPA service with keys for geometry, measure and feature id.
-        :param putin_snapped_epa_point: Dictionary with geometry, measure and id delineating the putin snapped to the
-            closest NHDPlus hydroline.
+        :param putin_epa_reach_id: Required - Integer or String
+            Reach id of EPA NHD Plus reach to start from.
+        :param putin_epa_measure: Required - Integer
+            Measure along specified reach to start from.
         :return: Single continuous ArcGIS Python API Line Geometry object.
         """
-        resp = self._get_epa_downstream_navigation_response(putin_snapped_epa_point)
+        resp = self._get_epa_downstream_navigation_response(putin_epa_reach_id, putin_epa_measure)
         return self._epa_navigation_response_to_esri_polyline(resp)
 
 
