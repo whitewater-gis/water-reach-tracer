@@ -729,6 +729,14 @@ class Reach(pd.Series):
         self.access_list.append(access)
 
     @property
+    def geometry(self):
+        """
+        Return the reach polyline geometry.
+        :return: Polyline Geometry
+        """
+        return self['SHAPE']
+
+    @property
     def as_feature(self):
         """
         Get the reach as an ArcGIS Python API Feature object.
@@ -736,7 +744,7 @@ class Reach(pd.Series):
         """
         return Feature(
             geometry=self['SHAPE'],
-            attributes=self[[val for val in self.keys() if val != 'SHAPE']].to_dict()
+            attributes=self[[val for val in self.keys() if val != 'SHAPE' and val != 'reach_points']].to_dict()
         )
 
 
