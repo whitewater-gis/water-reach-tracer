@@ -468,23 +468,23 @@ class Reach(pd.Series):
         super().__init__()
 
         self['reach_id'] = str(reach_id)
-        self['name'] = ''
+        self['reach_name'] = ''
+        self['reach_name_alternate'] = ''
         self['river_name'] = ''
-        self['river_alternate_name'] = ''
+        self['river_name_alternate'] = ''
         self['error'] = None  # boolean
         self['notes'] = ''
         self['difficulty'] = ''
         self['difficulty_minimum'] = ''
         self['difficulty_maximum'] = ''
         self['difficulty_outlier'] = ''
-        self['name_alternate'] = ''
         self['abstract'] = ''
         self['description'] = ''
         self['update_aw'] = None  # datetime
         self['update_arcgis'] = None  # datetime
         self['validated'] = None  # boolean
         self['validated_by'] = ''
-        self['hydroline'] = None
+        self['SHAPE'] = None
         self['reach_points'] = []
 
     @property
@@ -494,7 +494,7 @@ class Reach(pd.Series):
         :return: Point Geometry
             Centroid representing the reach location as a point.
         """
-        if type(self.hydroline) is Polyline:
+        if type(self.geometry) is Polyline:
             return self.hydroline.centroid
         else:
             return None
@@ -589,8 +589,8 @@ class Reach(pd.Series):
         # pull a bunch of attributes through validation and save as properties
         reach_info = self._reach_json['info']
         self.river_name = self._validate_aw_json(reach_info, 'river')
-        self.river_alternate_name = self._validate_aw_json(reach_info, 'altname')
-        self.name = self._validate_aw_json(reach_info, 'section')
+        self.reach_name = self._validate_aw_json(reach_info, 'section')
+        self.reach_alternate_name = self._validate_aw_json(reach_info, 'altname')
         self.huc = self._validate_aw_json(reach_info, 'huc')
         self.description = self._validate_aw_json(reach_info, 'description')
         self.abstract = self._validate_aw_json(reach_info, 'abstract')
@@ -693,24 +693,6 @@ class Reach(pd.Series):
         # add it to the reach point list
         self.reach_points.append(access)
 
-    def _update_putin_takeout_geometry(self, access_type, update_geometry):
-        """
-        From one method, enable updating the geometry for either the putin or takeout.
-        :param access_type: String - Required
-            Either putin or takeout.
-        :param update_geometry: Point Geometry - Required
-            Point geometry to be used for update.
-        :return:
-        """
-        # get either the putin or takeout ReachPoint object
-        access = self._get_accesses_by_type(access_type)
-
-        # update the geometry of the ReachPoint
-        access.geometry = update_geometry
-
-        # replace the access in the reach points
-        self._set_putin_takeout(access, access_type)
-
     @property
     def putin(self):
         access_list = self._get_accesses_by_type('putin')
@@ -745,6 +727,17 @@ class Reach(pd.Series):
         # TODO: update add_intermediate_access to support the subclassed Series paradigm
         access.set_type('intermediate')
         self.access_list.append(access)
+
+    @property
+    def as_feature(self):
+        """
+        Get the reach as an ArcGIS Python API Feature object.
+        :return: ArcGIS Python API Feature object representing the reach.
+        """
+        return Feature(
+            geometry=self['SHAPE'],
+            attributes=self[[val for val in self.keys() if val != 'SHAPE']].to_dict()
+        )
 
 
 class ReachPoint(pd.Series):
