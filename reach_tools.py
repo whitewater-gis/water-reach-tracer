@@ -667,9 +667,15 @@ class Reach(pd.Series):
         return [pt for pt in self.reach_points if pt.subtype == access_type and pt.point_type == 'access']
 
     def _set_putin_takeout(self, access, access_type):
-        # TODO: update _set_putin_takeout to support the subclassed Series paradigm
-
-        # enforce correct objec type
+        """
+        Set the putin or takeout using a ReachPoint object.
+        :param access: ReachPoint - Required
+            ReachPoint geometry delineating the location of the geometry to be modified.
+        :param access_type: String - Required
+            Either "putin" or "takeout".
+        :return:
+        """
+        # enforce correct object type
         if type(access) != ReachPoint:
             raise Exception('{} access must be an instance of ReachPoint object type'.format(access_type))
 
@@ -686,6 +692,24 @@ class Reach(pd.Series):
 
         # add it to the reach point list
         self.reach_points.append(access)
+
+    def _update_putin_takeout_geometry(self, access_type, update_geometry):
+        """
+        From one method, enable updating the geometry for either the putin or takeout.
+        :param access_type: String - Required
+            Either putin or takeout.
+        :param update_geometry: Point Geometry - Required
+            Point geometry to be used for update.
+        :return:
+        """
+        # get either the putin or takeout ReachPoint object
+        access = self._get_accesses_by_type(access_type)
+
+        # update the geometry of the ReachPoint
+        access.geometry = update_geometry
+
+        # replace the access in the reach points
+        self._set_putin_takeout(access, access_type)
 
     @property
     def putin(self):

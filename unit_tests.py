@@ -55,10 +55,9 @@ class ReachLDub(unittest.TestCase):
         self.assertTupleEqual((self.takeout_x, self.takeout_y), (takeout.geometry.x, takeout.geometry.y))
 
 
-
 class AccessPutin(unittest.TestCase):
     canyon_reach_id = 3066
-    putin_point = Geometry({'x': -121.633094, 'y': 45.79532367, 'spatialReference': {'wkid': 4269}})
+    putin_point = Geometry({'x': -121.633094, 'y': 45.79532367, 'spatialReference': {'wkid': 4326}})
     point_type = 'access'
     subtype = 'putin'
     name = 'Hayes Creek'
@@ -67,7 +66,7 @@ class AccessPutin(unittest.TestCase):
     collection_date = '02 Nov 1998'
 
     test_series = pd.Series({
-        "SHAPE": Geometry({'x': -121.633094, 'y': 45.79532367, 'spatialReference': {'wkid': 4269}}),
+        "SHAPE": Geometry({'x': -121.633094, 'y': 45.79532367, 'spatialReference': {'wkid': 4326}}),
         "reach_id": str(canyon_reach_id),
         "point_type": point_type,
         "subtype": subtype,
@@ -86,7 +85,7 @@ class AccessPutin(unittest.TestCase):
         "geometry": {
             "x": -121.633094,
             'y': 45.79532367,
-            "spatialReference": {"wkid": 4269}
+            "spatialReference": {"wkid": 4326}
         },
         "attributes": {
             'reach_id': '3066',
@@ -103,7 +102,7 @@ class AccessPutin(unittest.TestCase):
         }
     }
 
-    test_snap_geom_dict = {'x': -121.63309439504, 'y': 45.7953235252763, 'spatialReference': {'wkid': 4269}}
+    test_snap_geom_dict = {'x': -121.63309439504, 'y': 45.7953235252763, 'spatialReference': {'wkid': 4326}}
 
     def test_instantiate_access(self):
         access = ReachPoint(
