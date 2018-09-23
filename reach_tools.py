@@ -21,6 +21,7 @@ from arcgis.features import SpatialDataFrame as SDF
 from arcgis.features import FeatureLayer, Feature
 from arcgis.gis import GIS, Item
 import pandas as pd
+import numpy as np
 import re
 from html2text import html2text
 from uuid import uuid4
@@ -80,15 +81,24 @@ class WATERS(object):
         :return: Dictionary with three keys; geometry, measure, and id. Geometry is an ArcGIS Python API Point Geometry
         object. Measure and ID are values required as input parameters when using tracing WATER services.
         """
+        # hit the EPA's Point Indexing service to true up the point
         response_json = self._get_point_indexing(x, y)
 
-        coordinates = response_json['output']['end_point']['coordinates']
+        # if the point is not in the area covered by NHD (likely in Canada)
+        if response_json['output'] is None:
+            return False
 
-        return {
-            "geometry": Geometry(x=coordinates[0], y=coordinates[1], spatialReference={"wkid": 4326}),
-            "measure": response_json["output"]["ary_flowlines"][0]["fmeasure"],
-            "id": response_json["output"]["ary_flowlines"][0]["comid"]
-        }
+        else:
+
+            # extract out the coordinates
+            coordinates = response_json['output']['end_point']['coordinates']
+
+            # construct a Point geometry along with sending back the ComID and Measure needed for tracing
+            return {
+                "geometry": Geometry(x=coordinates[0], y=coordinates[1], spatialReference={"wkid": 4326}),
+                "measure": response_json["output"]["ary_flowlines"][0]["fmeasure"],
+                "id": response_json["output"]["ary_flowlines"][0]["comid"]
+            }
 
     @staticmethod
     def _get_epa_downstream_navigation_response(putin_epa_reach_id, putin_epa_measure):
@@ -106,12 +116,64 @@ class WATERS(object):
         url = "http://ofmpub.epa.gov/waters10/Navigation.Service"
 
         # input parameters as documented at https://www.epa.gov/waterdata/navigation-service
-        queryString = {
+        query_string = {
             "pNavigationType": "DM",
             "pStartComID": putin_epa_reach_id,
             "pStartMeasure": putin_epa_measure,
             "pMaxDistanceKm": 5000,
             "pReturnFlowlineAttr": True,
+            "f": "json"
+        }
+
+
+        # since requests don't always work, enable repeated tries up to 10
+        attempts = 0
+        status_code = 0
+
+        while attempts < 10 and status_code != 200:
+
+            # make the actual response to the REST endpoint
+            resp = requests.get(url, query_string)
+
+            # increment the attempts and pull out the status code
+            attempts = attempts + 1
+            status_code = resp.status_code
+
+            # if the status code is anything other than 200, provide a message of status
+            if status_code != 200:
+                print('Attempt {:02d} failed with status code {}'.format(attempts, status_code))
+
+        return resp
+
+    @staticmethod
+    def _get_epa_updown_ptp_response(putin_epa_reach_id, putin_epa_measure, takeout_epa_reach_id,
+                                     takeout_epa_measure):
+        """
+        Make a call to the WATERS Navigation Service and trace downstream using the putin snapped using
+            the EPA service with keys for geometry, measure and feature id.
+        :param putin_epa_reach_id: Required - Integer or String
+            Reach id of EPA NHD Plus reach to start from.
+        :param putin_epa_measure: Required - Integer
+            Measure along specified reach to start from.
+        :param takeout_epa_reach_id: Required - Integer or String
+            Reach id of EPA NHD Plus reach to end at.
+        :param takeout_epa_measure: Required - Integer
+            Measure along specified reach to end at.
+        :return: Raw response object from REST call.
+        """
+
+        # url for the REST call
+        url = "http://ofmpub.epa.gov/waters10/Navigation.Service"
+
+        # input parameters as documented at https://www.epa.gov/waterdata/upstreamdownstream-search-service
+        url = "http://ofmpub.epa.gov/waters10/UpstreamDownStream.Service"
+        query_string = {
+            "pNavigationType": "PP",
+            "pStartComID": putin_epa_reach_id,
+            "pStartMeasure": putin_epa_measure,
+            "pStopComID": takeout_epa_reach_id,
+            "pStopMeasure": takeout_epa_measure,
+            "pFlowlinelist": True,
             "f": "json"
         }
 
@@ -122,7 +184,7 @@ class WATERS(object):
         while attempts < 10 and status_code != 200:
 
             # make the actual response to the REST endpoint
-            resp = requests.get(url, queryString)
+            resp = requests.get(url, query_string)
 
             # increment the attempts and pull out the status code
             attempts = attempts + 1
@@ -160,9 +222,35 @@ class WATERS(object):
         else:
             raise TraceException('the tracing operation did not find any hydrolines')
 
-    def get_downstream_trace_polyline(self, putin_epa_reach_id, putin_epa_measure):
+    @staticmethod
+    def _epa_updown_response_to_esri_polyline(updown_response):
         """
-        Make a call to the WATERS Upstream/Downstream Search Service and trace downstream using the putin snapped using
+        From the raw response returned from the trace create a single ArcGIS Python API Line Geometry object.
+        :param updown_response: Raw trace response received from the REST endpoint.
+        :return: Single continuous ArcGIS Python API Line Geometry object.
+        """
+        resp_json = updown_response.json()
+
+        # if any flowlines were found, combine all the coordinate pairs into a single continuous line
+        if resp_json['output']['flowlines_traversed']:
+
+            # extract the dict descriptions of the geometries and convert to Shapely geometries
+            flowline_list = [shapely.geometry.shape(flowline['shape'])
+                             for flowline in resp_json['output']['flowlines_traversed']]
+
+            # use Shapely to combine all the lines into a single line
+            flowline = shapely.ops.linemerge(flowline_list)
+
+            # convert the LineString to a Polyline, and return the result
+            return Geometry.from_shapely(flowline)
+
+        # if no geometry is found, puke
+        else:
+            raise TraceException('the tracing operation did not find any hydrolines')
+
+    def get_downstream_navigation_polyline(self, putin_epa_reach_id, putin_epa_measure):
+        """
+        Make a call to the WATERS Navigation Search Service and trace downstream using the putin snapped using
             the EPA service with keys for geometry, measure and feature id.
         :param putin_epa_reach_id: Required - Integer or String
             Reach id of EPA NHD Plus reach to start from.
@@ -172,6 +260,24 @@ class WATERS(object):
         """
         resp = self._get_epa_downstream_navigation_response(putin_epa_reach_id, putin_epa_measure)
         return self._epa_navigation_response_to_esri_polyline(resp)
+
+    def get_updown_ptp_polyline(self, putin_epa_reach_id, putin_epa_measure, takeout_epa_reach_id, takeout_epa_measure):
+        """
+        Make a call to the WATERS Upstream/Downstream Search Service and trace downstream using the putin and takeout
+            snapped using the EPA service with keys for measure and feature id.
+        :param putin_epa_reach_id: Required - Integer or String
+            Reach id of EPA NHD Plus reach to start from.
+        :param putin_epa_measure: Required - Integer
+            Measure along specified reach to start from.
+        :param takeout_epa_reach_id: Required - Integer or String
+            Reach id of EPA NHD Plus reach to end at.
+        :param takeout_epa_measure: Required - Integer
+            Measure along specified reach to end at.
+        :return: Single continuous ArcGIS Python API Line Geometry object.
+        """
+        resp = self._get_epa_updown_ptp_response(putin_epa_reach_id, putin_epa_measure, takeout_epa_reach_id,
+                                                 takeout_epa_measure)
+        return self._epa_updown_response_to_esri_polyline(resp)
 
 
 class ReachAccessesSDF(SDF):
@@ -366,6 +472,23 @@ class _ReachIdFeatureLayer(FeatureLayer):
     def query_by_reach_id(self, reach_id):
         return self.query("reach_id = '{}'".format(reach_id)).df
 
+    def flush(self):
+        """
+        Delete all data!
+        :return: Response
+        """
+        # get a list of all OID's
+        oid_list = self.query(return_ids_only=True)['objectIds']
+
+        # if there are features
+        if len(oid_list):
+
+            # convert the list to a comma separated string
+            oid_deletes = ','.join([str(v) for v in oid_list])
+
+            # delete all the features using the OID string
+            return self.edit_features(deletes=oid_deletes)
+
 
 class ReachPointFeatureLayer(_ReachIdFeatureLayer):
 
@@ -453,8 +576,19 @@ class ReachFeatureLayer(_ReachIdFeatureLayer):
         return self.query(where_clause).df
 
     def add_reach(self, reach):
-        # TODO: implement add reach method to ReachFeatureLayer
-        return None
+        """
+        Push reach to feature service.
+        :param reach: Reach - Required
+            Reach object being pushed to feature service.
+        :return: Dictionary response
+        """
+
+        if type(reach) != Reach:
+            raise Exception('Reach to add must be a Reach object instance.')
+
+        resp = self.edit_features(adds=[reach.as_feature])
+
+        return resp
 
     def update_reach(self, reach):
         # TODO: implement update reach method to ReachFeatureLayer
@@ -491,11 +625,24 @@ class Reach(pd.Series):
     def centroid(self):
         """
         Get a point geometry centroid for the hydroline.
+
         :return: Point Geometry
             Centroid representing the reach location as a point.
         """
+        # if the hydroline is defined, use the centroid of the hydroline
         if type(self.geometry) is Polyline:
-            return self.hydroline.centroid
+            return self.geometry.centroid
+
+        # if both accesses are defined, use the mean of the accesses
+        elif type(self.putin) is ReachPoint and type(self.takeout) is ReachPoint:
+
+            # create a point geometry using the average coordinates
+            return Geometry(
+                x=np.mean([self.putin.geometry.x, self.takeout.geometry.x]),
+                y=np.mean([self.putin.geometry.y, self.takeout.geometry.y]),
+                spatialReference=self.putin.geometry.spatial_reference
+            )
+
         else:
             return None
 
@@ -506,9 +653,11 @@ class Reach(pd.Series):
         status_code = 0
 
         while attempts < 10 and status_code != 200:
-            response = requests.get(url)
-            if response.status_code == 200:
-                return response.json()
+            resp = requests.get(url)
+            if resp.status_code == 200 and len(resp.content):
+                return resp.json()
+            elif resp.status_code == 200 and not len(resp.content):
+                return False
             else:
                 attempts = attempts + 1
         raise Exception('cannot download data for reach_id {}'.format(self['reach_id']))
@@ -548,10 +697,11 @@ class Reach(pd.Series):
 
             else:
                 # now check to ensure there is actually some text in the block, not just blank characters
-                if not re.match(r'^( |\r|\n|\t)+$', value) and value != 'N/A':
+                if not (re.match(r'^([ \r\n\t])+$', value) or not (value != 'N/A')):
 
                     # if everything is good, return a value
                     return value
+
                 else:
                     return None
 
@@ -594,7 +744,9 @@ class Reach(pd.Series):
         self.huc = self._validate_aw_json(reach_info, 'huc')
         self.description = self._validate_aw_json(reach_info, 'description')
         self.abstract = self._validate_aw_json(reach_info, 'abstract')
-        self.length = float(self._validate_aw_json(reach_info, 'length'))
+        length = self._validate_aw_json(reach_info, 'length')
+        if length:
+            self.length = float(length)
 
         # save the update datetime as a true datetime object
         self.update_aw = datetime.datetime.strptime(reach_info['edited'], '%Y-%m-%d %H:%M:%S')
@@ -641,6 +793,10 @@ class Reach(pd.Series):
 
         # download raw JSON from American Whitewater
         raw_json = reach._download_raw_json_from_aw()
+
+        # if a reach does not exist at url, simply a blank response, return false
+        if not raw_json:
+            return False
 
         # parse data out of the AW JSON
         reach._parse_json(raw_json)
@@ -728,6 +884,44 @@ class Reach(pd.Series):
         access.set_type('intermediate')
         self.access_list.append(access)
 
+    def update_putin_takeout_and_trace(self, gis=GIS()):
+        """
+        Update the putin and takeout coordinates, and trace the hydroline
+        using the EPA's WATERS services.
+        :param gis: GIS - Optional
+            Optional GIS object used to set the geometry service.
+        :return:
+        """
+        # ensure a putin and takeout actually were found
+        if self.putin is None or self.takeout is None:
+            return False
+
+        # get the snapped and corrected reach locations for the put-in
+        self.putin.snap_to_nhdplus()
+
+        # use the EPA navigate service to trace downstream
+        waters = WATERS()
+        trace_polyline = waters.get_downstream_navigation_polyline(self.putin.nhdplus_reach_id,
+                                                                   self.putin.nhdplus_measure)
+
+        # project the takeout geometry to the same spatial reference as the trace polyline
+        takeout_geom = self.takeout.geometry.match_spatial_reference(self.takeout.geometry)
+
+        # snap the takeout geometry to the hydroline
+        takeout_geom = takeout_geom.snap_to_line(trace_polyline)
+
+        # update the takeout to the snapped point
+        self.takeout.set_geometry(takeout_geom)
+
+        # now dial in the coordinates using the EPA service
+        self.takeout.snap_to_nhdplus()
+
+        # get the geometry between the putin and takeout
+        self['SHAPE'] = waters.get_updown_ptp_polyline(self.putin.nhdplus_reach_id, self.putin.nhdplus_measure,
+                                                       self.takeout.nhdplus_reach_id, self.takeout.nhdplus_measure)
+
+        return True
+
     @property
     def geometry(self):
         """
@@ -746,6 +940,20 @@ class Reach(pd.Series):
             geometry=self['SHAPE'],
             attributes=self[[val for val in self.keys() if val != 'SHAPE' and val != 'reach_points']].to_dict()
         )
+
+    def publish(self, gis, reach_layer):
+        """
+        Publish the reach to a reach layer.
+        :param gis: GIS object providing the credentials.
+        :param reach_layer: ReachLayer to publish to.
+        :return: Response
+        """
+        if type(gis) != GIS:
+            raise Exception('gis must be a valid GIS object.')
+        if type(reach_layer) != ReachFeatureLayer:
+            raise Exception('reach_layer must be a valid ReachFeatureLayer')
+
+        return reach_layer.add_reach(self)
 
 
 class ReachPoint(pd.Series):
