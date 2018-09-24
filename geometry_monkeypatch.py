@@ -31,7 +31,6 @@ def snap_to_line(self, polyline_geometry):
     :return: arcgis.geometry.Point
         ArcGIS Point geometry coincident with the nearest location along the input
         ArcGIS Polyline object
-
     """
     if not isinstance(self, Point):
         raise Exception('Snap to line can only be performed on a Point geometry object.')
@@ -106,7 +105,7 @@ def trim_at_point(self, point_geometry):
 
 def project_as(self, output_spatial_reference):
     """
-    Project the geometry to another spatial reference, and automatically
+    Project the geometry to another spatial reference - automatically
     applying a transformation if necessary.
     :param output_spatial_reference: Required - SpatialReference
         Spatial reference object defining the output spatial reference.
@@ -120,7 +119,7 @@ def project_as(self, output_spatial_reference):
     else:
         raise Exception('Valid output spatial reference must be provided.')
 
-    wkid_in = wkid_in = self.spatial_reference['wkid']
+    wkid_in = self.spatial_reference['wkid']
 
     # if the spatial references match, don't do anything
     if wkid_in == wkid_out:
