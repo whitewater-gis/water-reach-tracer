@@ -66,7 +66,7 @@ class AccessPutin(unittest.TestCase):
     collection_date = '02 Nov 1998'
 
     test_series = pd.Series({
-        "SHAPE": Geometry({'x': -121.633094, 'y': 45.79532367, 'spatialReference': {'wkid': 4326}}),
+        "_geometry": Geometry({'x': -121.633094, 'y': 45.79532367, 'spatialReference': {'wkid': 4326}}),
         "reach_id": str(canyon_reach_id),
         "point_type": point_type,
         "subtype": subtype,

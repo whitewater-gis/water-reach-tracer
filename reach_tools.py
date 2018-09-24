@@ -13,11 +13,12 @@ purpose:    Provide the utilities to process and work with whitewater reach data
     See the License for the specific language governing permissions and
     limitations under the License.
 """
+from typing import List, Any
+
 import requests
 from arcgis.geometry import Geometry, Point, Polyline
 import itertools
 import datetime
-from arcgis.features import SpatialDataFrame as SDF
 from arcgis.features import FeatureLayer, Feature
 from arcgis.gis import GIS, Item
 import pandas as pd
@@ -280,346 +281,35 @@ class WATERS(object):
         return self._epa_updown_response_to_esri_polyline(resp)
 
 
-class ReachAccessesSDF(SDF):
-
-    @classmethod
-    def from_csv(cls, path, header=0, sep=',', index_col=0,
-                 parse_dates=True, encoding=None, tupleize_cols=None,
-                 infer_datetime_format=False, geometry_column='SHAPE'):
-        """
-        Read a CSV file and create a ReachAccessesSDF object instance. This table must
-            contain a field named "reach_id" and another containing the geometry for
-            the accesses.
-        :param path: string file path or file handle / StringIO
-        :param header: int, default 0
-            Row to use as header (skip prior rows)
-        :param sep: string, default ','
-            Field delimiter
-        :param index_col: int or sequence, default 0
-            Column to use for index. If a sequence is given, a MultiIndex
-            is used. Different default from read_table
-        :param parse_dates: boolean, default True
-            Parse dates. Different default from read_table
-        :param encoding:
-        :param tupleize_cols: boolean, default False
-            write multi_index columns as a list of tuples (if True)
-            or new (expanded format) if False)
-        :param infer_datetime_format: boolean, default False
-            If True and `parse_dates` is True for a column, try to infer the
-            datetime format based on the first datetime string. If the format
-            can be inferred, there often will be a large parsing speed-up.
-        :param geometry_column: string, default 'SHAPE'
-            Column containing the geometry.
-        :return: ReachesSDF
-        """
-        from pandas.io.parsers import read_table
-
-        df = read_table(path, header=header, sep=sep, parse_dates=parse_dates, index_col=index_col, encoding=encoding,
-                        tupleize_cols=tupleize_cols, infer_datetime_format=infer_datetime_format)
-
-        reach_id_field = 'reach_id'
-
-        # check for necessary fields
-        if reach_id_field not in df.columns:
-            raise Exception('input table must contain the {} field'.format(reach_id_field))
-        if geometry_column not in df.columns:
-            raise Exception('input table does not contain a geometry column named {}'.format(geometry_column))
-
-        # ensure the reach_id field is a string
-        if df[reach_id_field].dtype != object:
-            df[reach_id_field] = df[reach_id_field].astype(str)
-
-        # return a copy of this class with the data populated
-        return cls(
-            data=df[[col for col in df.columns if col != geometry_column]],
-            geometry=df[geometry_column].apply(lambda value: Geometry(eval(value)))
-        )
-
-    def _get_reach_accesses(self, reach_id, access_type):
-        """
-        When provided with a SpatialDataFrame with a reach_id field, extract a SpatialDataFrame for the correct type of
-            access - either putin, takeout, or intermediate.
-        :param reach_id: Reach ID
-        :param access_type: either exactly "putin", "takeout", or "intermediate"
-        :return: Series with all information for access type specified.
-        """
-        # just in case the reach_id is provided as an integer
-        reach_id = str(reach_id)
-
-        # a little error catching
-        if access_type != 'putin' or access_type != 'takeout' or access_type != 'intermediate':
-            raise TraceException('access_type must be either putin, takeout, or intermediate')
-        if type(reach_id) != str:
-            raise TraceException('reach_id must be a string representation of an integer')
-
-        # get the putin for the reach_id as a SpatialDataFrame
-        return self[(self[reach_id] == reach_id) & (self[type] == access_type)]
-
-    def _get_putin_takeout(self, reach_id, access_type):
-        """
-        Provide error catching wrapper to retrieve just
-        :param reach_id: Reach ID
-        :param access_type: either exactly "putin" or "takeout"
-        :return: Series with all information for access type specified.
-        """
-        if access_type != 'putin' or access_type != 'takeout':
-            raise TraceException('access_type must be either putin, or takeout')
-
-        filtered_sdf = self._get_reach_accesses(reach_id, access_type)
-
-        # if only one access exists, return it - otherwise start breaking stuff
-        if len(filtered_sdf.index) == 1:
-            return filtered_sdf.iloc[0]
-        elif len(filtered_sdf.index) > 1:
-            raise TraceException('more than one {} exists for reach_id {}'.format(access_type, reach_id))
-        else:
-            raise TraceException('no {} exists for reach_id {}'.format(access_type, reach_id))
-
-    def get_putin(self, reach_id):
-        """
-        Get just the putin as a Series from a SpatialDataFrame.
-        :param reach_id: Reach ID
-        :return: Series with all information for the putin.
-        """
-        return self._get_putin_takeout(reach_id, 'putin')
-
-    def get_takeout(self, reach_id):
-        """
-        Get just the putin as a Series from a SpatialDataFrame.
-        :param reach_id: Reach ID
-        :return: Series with all information for the takeout.
-        """
-        return self._get_putin_takeout(reach_id, 'takeout')
-
-
-class ReachSDF(SDF):
-
-    @classmethod
-    def from_csv(cls, path, header=0, sep=',', index_col=0,
-                 parse_dates=True, encoding=None, tupleize_cols=None,
-                 infer_datetime_format=False, geometry_column='SHAPE'):
-        """
-        Read a CSV file and create a ReachAccessesSDF object instance. This table must
-            contain a field named "reach_id" and another containing the geometry for
-            the accesses.
-        :param path: string file path or file handle / StringIO
-        :param header: int, default 0
-            Row to use as header (skip prior rows)
-        :param sep: string, default ','
-            Field delimiter
-        :param index_col: int or sequence, default 0
-            Column to use for index. If a sequence is given, a MultiIndex
-            is used. Different default from read_table
-        :param parse_dates: boolean, default True
-            Parse dates. Different default from read_table
-        :param encoding:
-        :param tupleize_cols: boolean, default False
-            write multi_index columns as a list of tuples (if True)
-            or new (expanded format) if False)
-        :param infer_datetime_format: boolean, default False
-            If True and `parse_dates` is True for a column, try to infer the
-            datetime format based on the first datetime string. If the format
-            can be inferred, there often will be a large parsing speed-up.
-        :param geometry_column: string, default 'SHAPE'
-            Column containing the geometry.
-        :return: ReachesSDF
-        """
-        from pandas.io.parsers import read_table
-
-        df = read_table(path, header=header, sep=sep, parse_dates=parse_dates, index_col=index_col, encoding=encoding,
-                        tupleize_cols=tupleize_cols, infer_datetime_format=infer_datetime_format)
-
-        reach_id_field = 'reach_id'
-
-        # check for necessary fields
-        if reach_id_field not in df.columns:
-            raise Exception('input table must contain the {} field'.format(reach_id_field))
-        if geometry_column not in df.columns:
-            raise Exception('input table does not contain a geometry column named {}'.format(geometry_column))
-
-        # ensure the reach_id field is a string
-        if df[reach_id_field].dtype != object:
-            df[reach_id_field] = df[reach_id_field].astype(str)
-
-        # return a copy of this class with the data populated
-        return cls(
-            data=df[[col for col in df.columns if col != geometry_column]],
-            geometry=df[geometry_column].apply(lambda value: Geometry(eval(value)))
-        )
-
-    @classmethod
-    def from_layer_item(cls, gis, item_id):
-        """
-        Create a ReachSDF from a feature layer.
-        :param gis: Valid Web GIS.
-        :param item_id: Layer Item identifier.
-        :return: ReachSDF created from either a point or line feature layer.
-        """
-        return Item(gis, item_id).layers[0].query().df
-
-
-class _ReachIdFeatureLayer(FeatureLayer):
-
-    @classmethod
-    def from_item_id(cls, gis, item_id):
-        url = Item(gis, item_id).layers[0].url
-        return cls(url, gis)
-
-    @classmethod
-    def from_url(cls, gis, url):
-        return cls(url, gis)
-
-    def query_by_reach_id(self, reach_id):
-        return self.query("reach_id = '{}'".format(reach_id)).df
-
-    def flush(self):
-        """
-        Delete all data!
-        :return: Response
-        """
-        # get a list of all OID's
-        oid_list = self.query(return_ids_only=True)['objectIds']
-
-        # if there are features
-        if len(oid_list):
-
-            # convert the list to a comma separated string
-            oid_deletes = ','.join([str(v) for v in oid_list])
-
-            # delete all the features using the OID string
-            return self.edit_features(deletes=oid_deletes)
-
-
-class ReachPointFeatureLayer(_ReachIdFeatureLayer):
-
-    def _add_reach_point(self, reach_point):
-        # TODO: Implement _add_reach_point for ReachPointFeatureLayer
-        return None
-
-    def add_access(self, access):
-        # TODO: Implement add_access for ReachPointFeatureLayer
-        return None
-
-    def add_putin(self, access):
-        # TODO: Implement add_putin for ReachPointFeatureLayer
-        return None
-
-    def add_takeout(self, access):
-        # TODO: Implement add_takeout for ReachPointFeatureLayer
-        return None
-
-    def add_intermediate(self, access):
-        # TODO: Implement add_intermediate for ReachPointFeatureLayer
-        return None
-
-    def _update_putin_takeout(self, access):
-        # TODO: Implement _update_putin_takeout for ReachPointFeatureLayer
-        return None
-
-    def update_putin(self, access):
-        # TODO: Implement update_putin for ReachPointFeatureLayer
-        return None
-
-    def update_takeout(self, access):
-        # TODO: Implement update_takeout for ReachPointFeatureLayer
-        return None
-
-    def get_accesses_sdf(self, reach_id):
-        # TODO: return array of Access objects
-        return ReachAccessesSDF(self.query_by_reach_id(reach_id))
-
-    def get_putin_sdf(self, reach_id):
-        return self.query("type = 'putin' AND reach_id = '{}'".format(reach_id)).df
-
-    def get_takeout_sdf(self, reach_id):
-        return self.query("type = 'takeout' AND reach_id = '{}'".format(reach_id)).df
-
-    def _create_reach_point_from_series(self, reach_point):
-
-        # create an access object instance with the required parameters
-        access = ReachPoint(reach_point['reach_id'], reach_point['SHAPE'], reach_point['type'])
-
-        # for the remainder of the fields from the service, populate if matching key in access object
-        for key in [val for val in reach_point.keys() if val not in ['reach_id', 'SHAPE', 'type']]:
-            if key in access.keys():
-                access[key] = reach_point[key]
-
-        return access
-
-    def get_putin(self, reach_id):
-
-        # get a pandas series from the feature service representing the putin access
-        sdf = self.get_putin_sdf(reach_id)
-        putin_series = sdf.iloc[0]
-        return self._create_reach_point_from_series(putin_series)
-
-    def get_takeout(self, reach_id):
-
-        # get a pandas series from the feature service representing the putin access
-        sdf = self.get_takeout_sdf(reach_id)
-        takeout_series = sdf.iloc[0]
-        return self._create_reach_point_from_series(takeout_series)
-
-
-class ReachFeatureLayer(_ReachIdFeatureLayer):
-
-    def query_by_river_name(self, river_name_search):
-        field_name = 'name_river'
-        where_list = ["{} LIKE '%{}%'".format(field_name, name_part) for name_part in river_name_search.split()]
-        where_clause = ' AND '.join(where_list)
-        return self.query(where_clause).df
-
-    def query_by_section_name(self, section_name_search):
-        field_name = 'name_section'
-        where_list = ["{} LIKE '%{}%'".format(field_name, name_part) for name_part in section_name_search.split()]
-        where_clause = ' AND '.join(where_list)
-        return self.query(where_clause).df
-
-    def add_reach(self, reach):
-        """
-        Push reach to feature service.
-        :param reach: Reach - Required
-            Reach object being pushed to feature service.
-        :return: Dictionary response
-        """
-
-        if type(reach) != Reach:
-            raise Exception('Reach to add must be a Reach object instance.')
-
-        resp = self.edit_features(adds=[reach.as_feature])
-
-        return resp
-
-    def update_reach(self, reach):
-        # TODO: implement update reach method to ReachFeatureLayer
-        return None
-
-
-class Reach(pd.Series):
+class Reach(object):
 
     def __init__(self, reach_id):
 
-        super().__init__()
+        self.reach_id = str(reach_id)
+        self.reach_name = ''
+        self.reach_name_alternate = ''
+        self.river_name = ''
+        self.river_name_alternate = ''
+        self.error = None  # boolean
+        self.notes = ''
+        self.difficulty = ''
+        self.difficulty_minimum = ''
+        self.difficulty_maximum = ''
+        self.difficulty_outlier = ''
+        self.abstract = ''
+        self.description = ''
+        self.update_aw = None  # datetime
+        self.update_arcgis = None  # datetime
+        self.validated = None  # boolean
+        self.validated_by = ''
+        self._geometry = None
+        self._reach_points = []
 
-        self['reach_id'] = str(reach_id)
-        self['reach_name'] = ''
-        self['reach_name_alternate'] = ''
-        self['river_name'] = ''
-        self['river_name_alternate'] = ''
-        self['error'] = None  # boolean
-        self['notes'] = ''
-        self['difficulty'] = ''
-        self['difficulty_minimum'] = ''
-        self['difficulty_maximum'] = ''
-        self['difficulty_outlier'] = ''
-        self['abstract'] = ''
-        self['description'] = ''
-        self['update_aw'] = None  # datetime
-        self['update_arcgis'] = None  # datetime
-        self['validated'] = None  # boolean
-        self['validated_by'] = ''
-        self['SHAPE'] = None
-        self['reach_points'] = []
+    @property
+    def reach_points(self):
+        pts = pd.DataFrame(self._reach_points)
+        pts.spatial.set_geometry('_geometry')
+        return pts
 
     @property
     def centroid(self):
@@ -757,7 +447,7 @@ class Reach(pd.Series):
 
         # ensure putin coordinates are present, and if so, add the put-in point to the points list
         if reach_info['plon'] is not None and reach_info['plat'] is not None:
-            self.reach_points.append(
+            self._reach_points.append(
                 ReachPoint(
                     reach_id=self.reach_id,
                     geometry=Point(
@@ -772,7 +462,7 @@ class Reach(pd.Series):
 
         # ensure take-out coordinates are present, and if so, add take-out point to points list
         if reach_info['tlon'] is not None and reach_info['tlat'] is not None:
-            self.reach_points.append(
+            self._reach_points.append(
                 ReachPoint(
                     reach_id=self.reach_id,
                     point_type='access',
@@ -820,7 +510,7 @@ class Reach(pd.Series):
             raise Exception('access type must be either "putin", "takeout" or "intermediate"')
 
         # return list of all accesses of specified type
-        return [pt for pt in self.reach_points if pt.subtype == access_type and pt.point_type == 'access']
+        return [pt for pt in self._reach_points if pt.subtype == access_type and pt.point_type == 'access']
 
     def _set_putin_takeout(self, access, access_type):
         """
@@ -840,20 +530,20 @@ class Reach(pd.Series):
             raise Exception('access type must be either "putin" or "takeout"')
 
         # update the list to NOT include the point we are adding
-        self.access_list = [pt for pt in self.reach_points if pt.subtype != access_type]
+        self.access_list = [pt for pt in self._reach_points if pt.subtype != access_type]
 
         # ensure the new point being added is the right type
         access.point_type = 'access'
         access.subtype = access_type
 
         # add it to the reach point list
-        self.reach_points.append(access)
+        self._reach_points.append(access)
 
     @property
     def putin(self):
-        access_list = self._get_accesses_by_type('putin')
-        if len(access_list) > 0:
-            return access_list[0]
+        access_df = self._get_accesses_by_type('putin')
+        if len(access_df) > 0:
+            return access_df[0]
         else:
             return None
 
@@ -862,9 +552,9 @@ class Reach(pd.Series):
 
     @property
     def takeout(self):
-        access_list = self._get_accesses_by_type('takeout')
-        if len(access_list) > 0:
-            return access_list[0]
+        access_df = self._get_accesses_by_type('takeout')
+        if len(access_df) > 0:
+            return access_df[0]
         else:
             return None
 
@@ -873,9 +563,9 @@ class Reach(pd.Series):
 
     @property
     def intermediate_accesses(self):
-        access_list = self._get_accesses_by_type('intermediate')
-        if len(access_list) > 0:
-            return access_list
+        access_df = self._get_accesses_by_type('intermediate')
+        if len(access_df) > 0:
+            return access_df
         else:
             return None
 
@@ -917,8 +607,8 @@ class Reach(pd.Series):
         self.takeout.snap_to_nhdplus()
 
         # get the geometry between the putin and takeout
-        self['SHAPE'] = waters.get_updown_ptp_polyline(self.putin.nhdplus_reach_id, self.putin.nhdplus_measure,
-                                                       self.takeout.nhdplus_reach_id, self.takeout.nhdplus_measure)
+        self._geometry = waters.get_updown_ptp_polyline(self.putin.nhdplus_reach_id, self.putin.nhdplus_measure,
+                                                        self.takeout.nhdplus_reach_id, self.takeout.nhdplus_measure)
 
         return True
 
@@ -928,7 +618,7 @@ class Reach(pd.Series):
         Return the reach polyline geometry.
         :return: Polyline Geometry
         """
-        return self['SHAPE']
+        return self._geometry
 
     @property
     def as_feature(self):
@@ -937,8 +627,9 @@ class Reach(pd.Series):
         :return: ArcGIS Python API Feature object representing the reach.
         """
         return Feature(
-            geometry=self['SHAPE'],
-            attributes=self[[val for val in self.keys() if val != 'SHAPE' and val != 'reach_points']].to_dict()
+            geometry=self._geometry,
+            attributes={key: vars(self)[key] for key in vars(self).keys()
+                        if key != '_geometry' and not key.startswith('_')}
         )
 
     def publish(self, gis, reach_layer):
@@ -956,7 +647,7 @@ class Reach(pd.Series):
         return reach_layer.add_reach(self)
 
 
-class ReachPoint(pd.Series):
+class ReachPoint(object):
     """
     Subclass of Pandas Series representing an access.
     """
@@ -964,27 +655,26 @@ class ReachPoint(pd.Series):
     def __init__(self, reach_id, geometry, point_type, uid=None, subtype=None, name=None, side_of_river=None,
                  collection_method=None, update_date=None, notes=None, description=None):
 
-        super().__init__()
-
-        self['reach_id'] = str(reach_id)
-        self['point_type'] = point_type
-        self['subtype'] = subtype
-        self['name'] = name
-        self['side_of_river'] = side_of_river
-        self['nhdplus_measure'] = None
-        self['nhdplus_reach_id'] = None
-        self['collection_method'] = collection_method
-        self['update_date'] = update_date
-        self['notes'] = notes
-        self['description'] = description
+        self.reach_id = str(reach_id)
+        self.point_type = point_type
+        self.subtype = subtype
+        self.name = name
+        self.side_of_river = side_of_river
+        self.nhdplus_measure = None
+        self.nhdplus_reach_id = None
+        self.collection_method = collection_method
+        self.update_date = update_date
+        self.notes = notes
+        self.description = description
+        self._geometry = None
 
         self.set_geometry(geometry)
         self.set_side_of_river(side_of_river)  # left or right
 
         if uid is None:
-            self['uid'] = uuid4().hex
+            self.uid = uuid4().hex
         else:
-            self['uid'] = uid
+            self.uid = uid
 
     @property
     def type_id(self):
@@ -998,7 +688,7 @@ class ReachPoint(pd.Series):
         :return: Point Geometry object
             Point where access is located.
         """
-        return self['SHAPE']
+        return self._geometry
 
     def set_geometry(self, geometry):
         """
@@ -1009,7 +699,7 @@ class ReachPoint(pd.Series):
         if type(geometry) != Point:
             raise Exception('access geometry must be a valid ArcGIS Point Geometry object')
         else:
-            self['SHAPE'] = geometry
+            self._geometry = geometry
             return True
 
     def set_side_of_river(self, side_of_river):
@@ -1021,7 +711,7 @@ class ReachPoint(pd.Series):
         if side_of_river is not None and side_of_river != 'left' and side_of_river != 'right':
             raise Exception('side of river must be either "left" or "right"')
         else:
-            self['side_of_river'] = side_of_river
+            self.side_of_river = side_of_river
 
     def snap_to_nhdplus(self):
         """
@@ -1033,8 +723,8 @@ class ReachPoint(pd.Series):
             waters = WATERS()
             epa_point = waters.get_epa_snap_point(self.geometry.x, self.geometry.y)
             self.set_geometry(epa_point['geometry'])
-            self['nhdplus_measure'] = epa_point['measure']
-            self['nhdplus_reach_id'] = epa_point['id']
+            self.nhdplus_measure = epa_point['measure']
+            self.nhdplus_reach_id = epa_point['id']
         return True
 
     @property
@@ -1044,6 +734,139 @@ class ReachPoint(pd.Series):
         :return: ArcGIS Python API Feature object representing the access.
         """
         return Feature(
-            geometry=self['SHAPE'],
-            attributes=self[[val for val in self.keys() if val != 'SHAPE']].to_dict()
+            geometry=self['_geometry'],
+            attributes=self[[val for val in self.keys() if val != '_geometry']].to_dict()
         )
+
+
+class _ReachIdFeatureLayer(FeatureLayer):
+
+    @classmethod
+    def from_item_id(cls, gis, item_id):
+        url = Item(gis, item_id).layers[0].url
+        return cls(url, gis)
+
+    @classmethod
+    def from_url(cls, gis, url):
+        return cls(url, gis)
+
+    def query_by_reach_id(self, reach_id):
+        return self.query("reach_id = '{}'".format(reach_id)).sdf
+
+    def flush(self):
+        """
+        Delete all data!
+        :return: Response
+        """
+        # get a list of all OID's
+        oid_list = self.query(return_ids_only=True)['objectIds']
+
+        # if there are features
+        if len(oid_list):
+
+            # convert the list to a comma separated string
+            oid_deletes = ','.join([str(v) for v in oid_list])
+
+            # delete all the features using the OID string
+            return self.edit_features(deletes=oid_deletes)
+
+
+class ReachPointFeatureLayer(_ReachIdFeatureLayer):
+
+    def _add_reach_point(self, reach_point):
+        # TODO: Implement _add_reach_point for ReachPointFeatureLayer
+        return None
+
+    def add_access(self, access):
+        # TODO: Implement add_access for ReachPointFeatureLayer
+        return None
+
+    def add_putin(self, access):
+        # TODO: Implement add_putin for ReachPointFeatureLayer
+        return None
+
+    def add_takeout(self, access):
+        # TODO: Implement add_takeout for ReachPointFeatureLayer
+        return None
+
+    def add_intermediate(self, access):
+        # TODO: Implement add_intermediate for ReachPointFeatureLayer
+        return None
+
+    def _update_putin_takeout(self, access):
+        # TODO: Implement _update_putin_takeout for ReachPointFeatureLayer
+        return None
+
+    def update_putin(self, access):
+        # TODO: Implement update_putin for ReachPointFeatureLayer
+        return None
+
+    def update_takeout(self, access):
+        # TODO: Implement update_takeout for ReachPointFeatureLayer
+        return None
+
+    def get_putin_sdf(self, reach_id):
+        return self.query("type = 'putin' AND reach_id = '{}'".format(reach_id)).df
+
+    def get_takeout_sdf(self, reach_id):
+        return self.query("type = 'takeout' AND reach_id = '{}'".format(reach_id)).df
+
+    def _create_reach_point_from_series(self, reach_point):
+
+        # create an access object instance with the required parameters
+        access = ReachPoint(reach_point['reach_id'], reach_point['_geometry'], reach_point['type'])
+
+        # for the remainder of the fields from the service, populate if matching key in access object
+        for key in [val for val in reach_point.keys() if val not in ['reach_id', '_geometry', 'type']]:
+            if key in access.keys():
+                access[key] = reach_point[key]
+
+        return access
+
+    def get_putin(self, reach_id):
+
+        # get a pandas series from the feature service representing the putin access
+        sdf = self.get_putin_sdf(reach_id)
+        putin_series = sdf.iloc[0]
+        return self._create_reach_point_from_series(putin_series)
+
+    def get_takeout(self, reach_id):
+
+        # get a pandas series from the feature service representing the putin access
+        sdf = self.get_takeout_sdf(reach_id)
+        takeout_series = sdf.iloc[0]
+        return self._create_reach_point_from_series(takeout_series)
+
+
+class ReachFeatureLayer(_ReachIdFeatureLayer):
+
+    def query_by_river_name(self, river_name_search):
+        field_name = 'name_river'
+        where_list = ["{} LIKE '%{}%'".format(field_name, name_part) for name_part in river_name_search.split()]
+        where_clause = ' AND '.join(where_list)
+        return self.query(where_clause).df
+
+    def query_by_section_name(self, section_name_search):
+        field_name = 'name_section'
+        where_list = ["{} LIKE '%{}%'".format(field_name, name_part) for name_part in section_name_search.split()]
+        where_clause = ' AND '.join(where_list)
+        return self.query(where_clause).df
+
+    def add_reach(self, reach):
+        """
+        Push reach to feature service.
+        :param reach: Reach - Required
+            Reach object being pushed to feature service.
+        :return: Dictionary response
+        """
+
+        if type(reach) != Reach:
+            raise Exception('Reach to add must be a Reach object instance.')
+
+        resp = self.edit_features(adds=[reach.as_feature])
+
+        return resp
+
+    def update_reach(self, reach):
+        # TODO: implement update reach method to ReachFeatureLayer
+        return None
