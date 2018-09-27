@@ -28,6 +28,7 @@ from html2text import html2text
 from uuid import uuid4
 import shapely.ops
 import shapely.geometry
+import json
 
 # kind of nasty hack module for stuff not in the Python API
 from geometry_monkeypatch import *
@@ -336,6 +337,17 @@ class Reach(object):
         else:
             return None
 
+    @property
+    def extent(self):
+        """
+        Provide the extent of the reach as (xmin, ymin, xmax, ymax)
+        :return: Set (xmin, ymin, xmax, ymax)
+        """
+        if self._geometry:
+            return self._geometry.extent
+        else:
+            return (min(self.putin.x, self.takeout.x), min(self.putin.y, self.takeout.y))
+
     def _download_raw_json_from_aw(self):
         url = 'https://www.americanwhitewater.org/content/River/detail/id/{}/.json'.format(self.reach_id)
 
@@ -574,7 +586,7 @@ class Reach(object):
         access.set_type('intermediate')
         self.access_list.append(access)
 
-    def update_putin_takeout_and_trace(self, gis=GIS()):
+    def update_putin_takeout_and_trace(self):
         """
         Update the putin and takeout coordinates, and trace the hydroline
         using the EPA's WATERS services.
@@ -649,7 +661,7 @@ class Reach(object):
 
 class ReachPoint(object):
     """
-    Subclass of Pandas Series representing an access.
+    Discrete object facilitating working with reach points.
     """
 
     def __init__(self, reach_id, geometry, point_type, uid=None, subtype=None, name=None, side_of_river=None,
