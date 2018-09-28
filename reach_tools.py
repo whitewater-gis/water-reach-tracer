@@ -512,7 +512,11 @@ class Reach(object):
         if type(reach_layer) != ReachFeatureLayer:
             raise Exception('reach_layer must be a ReachFeatureLayer')
 
-        response = reach_layer.query_by_reach_id(reach_id)
+        # create instance of reach
+        reach = cls(reach_id)
+
+        # get a dataframe, and since there is only one of each reach, get the first
+        reach_s = reach_layer.query_by_reach_id(reach_id).sdf.iloc[0]
         # TODO: finish implementing get_from_arcgis method
 
     def _get_accesses_by_type(self, access_type):
@@ -763,7 +767,7 @@ class _ReachIdFeatureLayer(FeatureLayer):
         return cls(url, gis)
 
     def query_by_reach_id(self, reach_id):
-        return self.query("reach_id = '{}'".format(reach_id)).sdf
+        return self.query("reach_id = '{}'".format(reach_id))
 
     def flush(self):
         """
