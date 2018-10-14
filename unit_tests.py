@@ -146,5 +146,20 @@ class AccessPutin(unittest.TestCase):
         self.assertDictEqual(access.as_feature.as_dict['geometry'], self.test_snap_geom_dict)
 
 
+class ReachOutOfUSA(unittest.TestCase):
+
+    """
+    Starts in BC and ends in Alaska, should ideally write to centroid feature service with
+    error flagged and described in notes. Longer term, should fall back to ArcGIS Online
+    Service to trace using elevation service.
+    """
+    reach_id = 1
+
+    def test_trace_result(self):
+        reach = Reach.get_from_aw(self.reach_id)
+        reach.update_putin_takeout_and_trace()
+        self.assertEqual(type(reach.centroid), Point)
+
+
 if __name__ == '__main__':
     unittest.main()
