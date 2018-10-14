@@ -62,3 +62,6 @@ target/
 
 # JetBrains
 .idea/
+
+resources/rapids\.zip
+**/*.DS_Store
