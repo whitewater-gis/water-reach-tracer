@@ -13,11 +13,8 @@ purpose:    Provide the utilities to process and work with whitewater reach data
     See the License for the specific language governing permissions and
     limitations under the License.
 """
-from typing import List, Any
 
 import requests
-from arcgis.geometry import Geometry, Point, Polyline
-import itertools
 import datetime
 from arcgis.features import FeatureLayer, Feature, GeoAccessor, GeoSeriesAccessor
 from arcgis.gis import GIS, Item
@@ -28,7 +25,6 @@ from html2text import html2text
 from uuid import uuid4
 import shapely.ops
 import shapely.geometry
-import json
 
 # kind of nasty hack module for stuff not in the Python API
 from geometry_monkeypatch import *
@@ -598,7 +594,6 @@ class Reach(object):
             return None
 
     def add_intermediate_access(self, access):
-        # TODO: update add_intermediate_access to support the subclassed Series paradigm
         access.set_type('intermediate')
         self.access_list.append(access)
 
@@ -709,9 +704,11 @@ class Reach(object):
         # add the reach lines and reach centroids
         resp_line = reach_line_layer.add_reach(self)
         resp_centroid = reach_centroid_layer.add_reach(self)
-        resp_point = reach_point_layer.add_reach(self.reach_points_as_features)
+        resp_point = reach_point_layer.add_reach(self)
 
-        return reach_line_layer.add_reach(self)
+        # TODO: Add error checking responses ensuring all uploads worked
+
+        return True
 
     def plot_map(self, gis=GIS()):
         """
@@ -910,24 +907,21 @@ class _ReachIdFeatureLayer(FeatureLayer):
 
 class ReachPointFeatureLayer(_ReachIdFeatureLayer):
 
+    def add_reach(self, reach):
+        """
+        Push new reach points to the reach point feature service in bulk.
+        :param reach: Reach - Required
+            Reach object being pushed to feature service.
+        :return: Dictionary response from edit features method.
+        """
+        # check for correct object type
+        if type(reach) != Reach:
+            raise Exception('Reach to add must be a Reach object instance.')
+
+        return self.edit_features(adds=reach.reach_points_as_features)
+
     def _add_reach_point(self, reach_point):
         # TODO: Implement _add_reach_point for ReachPointFeatureLayer
-        return None
-
-    def add_access(self, access):
-        # TODO: Implement add_access for ReachPointFeatureLayer
-        return None
-
-    def add_putin(self, access):
-        # TODO: Implement add_putin for ReachPointFeatureLayer
-        return None
-
-    def add_takeout(self, access):
-        # TODO: Implement add_takeout for ReachPointFeatureLayer
-        return None
-
-    def add_intermediate(self, access):
-        # TODO: Implement add_intermediate for ReachPointFeatureLayer
         return None
 
     def _update_putin_takeout(self, access):
