@@ -330,7 +330,11 @@ class Reach(object):
         """
         # if the hydroline is defined, use the centroid of the hydroline
         if type(self.geometry) is Polyline:
-            return self.geometry.centroid
+            return Geometry(
+                x=self.geometry.centroid[0],
+                y=self.geometry.centroid[1],
+                spatialReference=self.putin.geometry.spatial_reference
+            )
 
         # if both accesses are defined, use the mean of the accesses
         elif type(self.putin) is ReachPoint and type(self.takeout) is ReachPoint:
@@ -696,13 +700,16 @@ class Reach(object):
         :return: True if successful
         """
 
-        if isinstance(gis, GIS):
+        if type(gis) != GIS:
             raise Exception('gis must be a valid GIS object.')
-        if isinstance(reach_line_layer, ReachFeatureLayer) or isinstance(reach_centroid_layer, ReachFeatureLayer):
+        if type(reach_line_layer) != ReachFeatureLayer or type(reach_centroid_layer) != ReachFeatureLayer:
             raise Exception('Reach line and point layers must be a valid ReachFeatureLayer instances.')
 
-        # add the reach lines and reach centroids
-        resp_line = reach_line_layer.add_reach(self)
+        # add the reach line if it was successfully traced
+        if not self.error:
+            resp_line = reach_line_layer.add_reach(self)
+
+        # regardless, add the centroid and points
         resp_centroid = reach_centroid_layer.add_reach(self)
         resp_point = reach_point_layer.add_reach(self)
 
@@ -752,6 +759,16 @@ class Reach(object):
                 "yoffset": 12,
                 "type": "esriPMS",
                 "url": "http://static.arcgis.com/images/Symbols/Basic/RedFlag.png",
+                "contentType": "image/png",
+                "width": 24,
+                "height": 24
+            }
+        )
+        webmap.draw(
+            shape=self.as_centroid_feature.geometry,
+            symbol={
+                "type": "esriPMS",
+                "url": "http://static.arcgis.com/images/Symbols/Basic/CircleX.png",
                 "contentType": "image/png",
                 "width": 24,
                 "height": 24
