@@ -301,6 +301,7 @@ class Reach(object):
         self.validated_by = ''
         self._geometry = None
         self._reach_points = []
+        self.agency = None
 
     @property
     def reach_points_as_features(self):
@@ -398,6 +399,10 @@ class Reach(object):
         if key not in json_block.keys():
             return None
 
+        # ensure there is a value for the key
+        elif json_block[key] is None:
+            return None
+
         else:
 
             # clean up the text garbage...because there is a lot of it
@@ -439,6 +444,9 @@ class Reach(object):
         # get rid of any trailing newlines at end of entire text block
         cleanup = re.sub(r'\n+$', '', cleanup)
 
+        # correct any leftover standalone links
+        cleanup = cleanup.replace('<', '[').replace('>', ']')
+
         # get rid of any leading or trailing spaces
         cleanup = cleanup.strip()
 
@@ -458,6 +466,7 @@ class Reach(object):
         self.huc = self._validate_aw_json(reach_info, 'huc')
         self.description = self._validate_aw_json(reach_info, 'description')
         self.abstract = self._validate_aw_json(reach_info, 'abstract')
+        self.agency = self._validate_aw_json(reach_info, 'agency')
         length = self._validate_aw_json(reach_info, 'length')
         if length:
             self.length = float(length)
@@ -648,8 +657,10 @@ class Reach(object):
             return False
 
         # get the geometry between the putin and takeout
-        self._geometry = waters.get_updown_ptp_polyline(self.putin.nhdplus_reach_id, self.putin.nhdplus_measure,
-                                                        self.takeout.nhdplus_reach_id, self.takeout.nhdplus_measure)
+        self._geometry = waters.get_updown_ptp_polyline(self.putin.nhdplus_reach_id,
+                                                        self.putin.nhdplus_measure,
+                                                        self.takeout.nhdplus_reach_id,
+                                                        self.takeout.nhdplus_measure)
 
         # if map result desired, return it
         if webmap:
