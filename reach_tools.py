@@ -633,34 +633,51 @@ class Reach(object):
             self.notes = 'Putin could not be located using EPA\'s WATERS service'
             return False
 
-        # use the EPA navigate service to trace downstream
-        waters = WATERS()
-        trace_polyline = waters.get_downstream_navigation_polyline(self.putin.nhdplus_reach_id,
-                                                                   self.putin.nhdplus_measure)
+        # try to trace a few times, but if it doesn't work, error and report
+        attempts = 0
+        max_attempts = 5
 
-        # project the takeout geometry to the same spatial reference as the trace polyline
-        takeout_geom = self.takeout.geometry.match_spatial_reference(self.takeout.geometry)
+        try:
 
-        # snap the takeout geometry to the hydroline
-        takeout_geom = takeout_geom.snap_to_line(trace_polyline)
+            # use the EPA navigate service to trace downstream
+            waters = WATERS()
+            trace_polyline = waters.get_downstream_navigation_polyline(self.putin.nhdplus_reach_id,
+                                                                       self.putin.nhdplus_measure)
 
-        # update the takeout to the snapped point
-        self.takeout.set_geometry(takeout_geom)
+            # project the takeout geometry to the same spatial reference as the trace polyline
+            takeout_geom = self.takeout.geometry.match_spatial_reference(self.takeout.geometry)
 
-        # now dial in the coordinates using the EPA service - getting the rest of the attributes
-        self.takeout.snap_to_nhdplus()
+            # snap the takeout geometry to the hydroline
+            takeout_geom = takeout_geom.snap_to_line(trace_polyline)
 
-        # ensure a takeout was actually found
-        if self.takeout.nhdplus_measure is None or self.takeout.nhdplus_reach_id is None:
-            self.error = True
-            self.notes = 'Takeout could not be located using EPS\'s WATERS service'
-            return False
+            # update the takeout to the snapped point
+            self.takeout.set_geometry(takeout_geom)
 
-        # get the geometry between the putin and takeout
-        self._geometry = waters.get_updown_ptp_polyline(self.putin.nhdplus_reach_id,
-                                                        self.putin.nhdplus_measure,
-                                                        self.takeout.nhdplus_reach_id,
-                                                        self.takeout.nhdplus_measure)
+            # now dial in the coordinates using the EPA service - getting the rest of the attributes
+            self.takeout.snap_to_nhdplus()
+
+            # ensure a takeout was actually found
+            if self.takeout.nhdplus_measure is None or self.takeout.nhdplus_reach_id is None:
+                self.error = True
+                self.notes = 'Takeout could not be located using EPS\'s WATERS service'
+                return False
+
+            # get the geometry between the putin and takeout
+            self._geometry = waters.get_updown_ptp_polyline(self.putin.nhdplus_reach_id,
+                                                            self.putin.nhdplus_measure,
+                                                            self.takeout.nhdplus_reach_id,
+                                                            self.takeout.nhdplus_measure)
+
+        except:
+
+            # increment the attempt counter
+            attempts += 1
+
+            # if tried too many times
+            if attempts == max_attempts:
+                self.error = True
+                self.notes = 'The reach could not be traced using the EPA\'s WATERS service.'
+                return False
 
         # if map result desired, return it
         if webmap:
