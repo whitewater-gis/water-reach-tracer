@@ -2,8 +2,7 @@ import unittest
 from arcgis.geometry import Geometry
 import pandas as pd
 
-from reach_tools import *
-
+from src.reach_tools import *
 
 class ReachLDub(unittest.TestCase):
     reach_id = 2156
@@ -11,6 +10,62 @@ class ReachLDub(unittest.TestCase):
     putin_y = 45.794848
     takeout_x = -121.645582
     takeout_y = 45.718817
+    name = 'Little White Salmon'
+
+    def test_class_init(self):
+        reach = Reach(self.reach_id)
+        self.assertEqual(str(self.reach_id), reach.reach_id)
+
+    def test_download_raw_json_from_aw(self):
+        reach = Reach(self.reach_id)
+        raw_json = reach._download_raw_json_from_aw()
+        self.assertTrue('CContainerViewJSON_view' in raw_json)
+
+    def test_parse_difficulty_string(self):
+        difficulty = 'IV-V(V+)'
+        reach = Reach(self.reach_id)
+        reach._parse_difficulty_string(difficulty)
+        if reach.difficulty_minimum != 'IV':
+            status = False
+        elif reach.difficulty_maximum != 'V':
+            status = False
+        elif reach.difficulty_outlier != 'V+':
+            status = False
+        else:
+            status = True
+        self.assertTrue(status)
+
+    def test_get_from_aw(self):
+        reach = Reach.get_from_aw(self.reach_id)
+        self.assertTrue(reach.river_name == 'Little White Salmon')
+
+    def test_get_accesses_by_type(self):
+        reach = Reach.get_from_aw(self.reach_id)
+        putin = reach._get_accesses_by_type('putin')[0]
+        self.assertTupleEqual((self.putin_x, self.putin_y), (putin.geometry.x, putin.geometry.y))
+
+    def test_putin(self):
+        reach = Reach.get_from_aw(self.reach_id)
+        putin = reach.putin
+        self.assertTupleEqual((self.putin_x, self.putin_y), (putin.geometry.x, putin.geometry.y))
+
+    def test_takeout(self):
+        reach = Reach.get_from_aw(self.reach_id)
+        takeout = reach.takeout
+        self.assertTupleEqual((self.takeout_x, self.takeout_y), (takeout.geometry.x, takeout.geometry.y))
+
+    def test_trace_result(self):
+        reach = Reach.get_from_aw(self.reach_id)
+        reach.update_putin_takeout_and_trace()
+        self.assertIsInstance(reach.geometry, Polyline)
+
+
+class ReachCanyon(unittest.TestCase):
+    reach_id = 3066
+    putin_x = -122.31600189209
+    putin_y = 45.939998626709
+    takeout_x = -122.373001098633
+    takeout_y = 45.9604988098145
 
     def test_class_init(self):
         ldub = Reach(self.reach_id)
@@ -37,7 +92,7 @@ class ReachLDub(unittest.TestCase):
 
     def test_get_from_aw(self):
         ldub = Reach.get_from_aw(self.reach_id)
-        self.assertTrue(ldub.river_name == 'Little White Salmon')
+        self.assertTrue(ldub.river_name == 'Canyon Creek (Lewis River trib.)')
 
     def test_get_accesses_by_type(self):
         ldub = Reach.get_from_aw(self.reach_id)
@@ -53,6 +108,11 @@ class ReachLDub(unittest.TestCase):
         ldub = Reach.get_from_aw(self.reach_id)
         takeout = ldub.takeout
         self.assertTupleEqual((self.takeout_x, self.takeout_y), (takeout.geometry.x, takeout.geometry.y))
+
+    def test_trace_result(self):
+        reach = Reach.get_from_aw(self.reach_id)
+        reach.update_putin_takeout_and_trace()
+        self.assertIsInstance(reach.geometry, Polyline)
 
 
 class AccessPutin(unittest.TestCase):
@@ -98,7 +158,8 @@ class AccessPutin(unittest.TestCase):
             'collection_method': 'digitized',
             'update_date': '02 Nov 1998',
             'notes': None,
-            'description': None
+            'description': None,
+            'difficulty': None
         }
     }
 
@@ -128,7 +189,7 @@ class AccessPutin(unittest.TestCase):
             collection_method=self.collection_method,
             update_date=self.collection_date
         )
-        access.pop('uid')  # since this will be different every time, just remove it
+        delattr(access, 'uid')  # since this will be different every time, just remove it
         self.assertDictEqual(access.as_feature.as_dict, self.test_feature_dict)
 
     def test_snap_geom_to_nhdplus(self):

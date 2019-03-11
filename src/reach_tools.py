@@ -13,21 +13,25 @@ purpose:    Provide the utilities to process and work with whitewater reach data
     See the License for the specific language governing permissions and
     limitations under the License.
 """
-
 import requests
 import datetime
 from arcgis.features import FeatureLayer, Feature, GeoAccessor, GeoSeriesAccessor
+from arcgis.geometry import Geometry, Point, Polyline
 from arcgis.gis import GIS, Item
 import pandas as pd
 import numpy as np
 import re
-from .lib.html2text import html2text
 from uuid import uuid4
 import shapely.ops
 import shapely.geometry
 
-# kind of nasty hack module for stuff not in the Python API
-from .geometry_monkeypatch import *
+# overcoming challenges of python 3.x relative imports
+try:
+    from html2text import html2text
+    from geometry_monkeypatch import *
+except:
+    from .html2text import html2text
+    from .geometry_monkeypatch import *
 
 
 class TraceException(Exception):
@@ -93,7 +97,7 @@ class WATERS(object):
 
             # construct a Point geometry along with sending back the ComID and Measure needed for tracing
             return {
-                "geometry": Geometry(x=coordinates[0], y=coordinates[1], spatialReference={"wkid": 4326}),
+                "geometry": Geometry({'x': coordinates[0], 'y':coordinates[1], 'spatialReference':{"wkid": 4326}}),
                 "measure": response_json["output"]["ary_flowlines"][0]["fmeasure"],
                 "id": response_json["output"]["ary_flowlines"][0]["comid"]
             }
@@ -214,7 +218,9 @@ class WATERS(object):
             flowline = shapely.ops.linemerge(flowline_list)
 
             # convert the LineString to a Polyline, and return the result
-            return Geometry.from_shapely(flowline)
+            arcgis_geometry = Polyline({'paths': [[c for c in flowline.coords]], 'spatialReference': {'wkid': 4326}})
+
+            return arcgis_geometry
 
         # if no geometry is found, puke
         else:
@@ -240,7 +246,9 @@ class WATERS(object):
             flowline = shapely.ops.linemerge(flowline_list)
 
             # convert the LineString to a Polyline, and return the result
-            return Geometry.from_shapely(flowline)
+            arcgis_geometry = Polyline({'paths': [[c for c in flowline.coords]], 'spatialReference': {'wkid': 4326}})
+
+            return arcgis_geometry
 
         # if no geometry is found, puke
         else:
@@ -331,21 +339,21 @@ class Reach(object):
         """
         # if the hydroline is defined, use the centroid of the hydroline
         if type(self.geometry) is Polyline:
-            return Geometry(
-                x=self.geometry.centroid[0],
-                y=self.geometry.centroid[1],
-                spatialReference=self.putin.geometry.spatial_reference
-            )
+            return Geometry({
+                'x': np.mean([self.putin.geometry.x, self.takeout.geometry.x]),
+                'y': np.mean([self.putin.geometry.y, self.takeout.geometry.y]),
+                'spatialReference': self.putin.geometry.spatial_reference
+            })
 
         # if both accesses are defined, use the mean of the accesses
         elif type(self.putin) is ReachPoint and type(self.takeout) is ReachPoint:
 
             # create a point geometry using the average coordinates
-            return Geometry(
-                x=np.mean([self.putin.geometry.x, self.takeout.geometry.x]),
-                y=np.mean([self.putin.geometry.y, self.takeout.geometry.y]),
-                spatialReference=self.putin.geometry.spatial_reference
-            )
+            return Geometry({
+                'x': np.mean([self.putin.geometry.x, self.takeout.geometry.x]),
+                'y': np.mean([self.putin.geometry.y, self.takeout.geometry.y]),
+                'spatialReference': self.putin.geometry.spatial_reference
+            })
 
         else:
             return None
@@ -359,7 +367,10 @@ class Reach(object):
         if self._geometry:
             return self._geometry.extent
         else:
-            return (min(self.putin.x, self.takeout.x), min(self.putin.y, self.takeout.y))
+            return (
+                min(self.putin.geometry.x, self.takeout.geometry.x), 
+                min(self.putin.geometry.y, self.takeout.geometry.y)
+            )
 
     def _download_raw_json_from_aw(self):
         url = 'https://www.americanwhitewater.org/content/River/detail/id/{}/.json'.format(self.reach_id)
@@ -483,11 +494,11 @@ class Reach(object):
             self._reach_points.append(
                 ReachPoint(
                     reach_id=self.reach_id,
-                    geometry=Point(
-                        x=float(reach_info['plon']),
-                        y=float(reach_info['plat']),
-                        spatialReference={'wkid': 4326}
-                    ),
+                    geometry=Point({
+                        'x': float(reach_info['plon']),
+                        'y': float(reach_info['plat']),
+                        'spatialReference': {'wkid': 4326}
+                    }),
                     point_type='access',
                     subtype='putin'
                 )
@@ -500,11 +511,11 @@ class Reach(object):
                     reach_id=self.reach_id,
                     point_type='access',
                     subtype='takeout',
-                    geometry=Point(
-                        x=float(reach_info['tlon']),
-                        y=float(reach_info['tlat']),
-                        spatialReference={'wkid': 4326}
-                    )
+                    geometry=Point({
+                        'x': float(reach_info['tlon']),
+                        'y': float(reach_info['tlat']),
+                        'spatialReference': {'wkid': 4326}
+                    })
                 )
             )
 
@@ -589,9 +600,9 @@ class Reach(object):
 
     @property
     def takeout(self):
-        access_df = self._get_accesses_by_type('takeout')
-        if len(access_df) > 0:
-            return access_df[0]
+        access_lst = self._get_accesses_by_type('takeout')
+        if len(access_lst) > 0:
+            return access_lst[0]
         else:
             return None
 
@@ -754,10 +765,11 @@ class Reach(object):
         webmap = gis.map()
         webmap.basemap = 'topo-vector'
         webmap.extent = {
-            'xmin': self.extent[0],
-            'ymin': self.extent[1],
-            'xmax': self.extent[2],
-            'ymax': self.extent[3]
+            'xmin': self.geometry.extent[0],
+            'ymin': self.geometry.extent[1],
+            'xmax': self.geometry.extent[2],
+            'ymax': self.geometry.extent[3],
+            'spatialReference': {'wkid': 4326}
         }
         webmap.draw(
             shape=self.geometry,
@@ -855,7 +867,7 @@ class ReachPoint(object):
         :param geometry: Point Geometry Object
         :return: Boolean True if successful
         """
-        if type(geometry) != Point:
+        if geometry.type != 'Point':
             raise Exception('access geometry must be a valid ArcGIS Point Geometry object')
         else:
             self._geometry = geometry
@@ -966,11 +978,19 @@ class ReachPointFeatureLayer(_ReachIdFeatureLayer):
         return self.edit_features(adds=reach.reach_points_as_features)
 
     def _add_reach_point(self, reach_point):
-        # TODO: Implement _add_reach_point for ReachPointFeatureLayer
+        # add a new reach point to ArcGIS Online
+        resp = self.update(adds=[reach_point.as_feature])
+
+        # TODO: handle the response
         return None
 
     def _update_putin_takeout(self, access):
         # TODO: Implement _update_putin_takeout for ReachPointFeatureLayer
+        # query to get the putin by reach_id and access type
+        access_fs = self.query(f"reach_id = '{access.reach_id}' AND type = '{access.point_type}'")
+
+        # update the feature set with the updated access properties
+        # push the update and return boolean success or failure
         return None
 
     def update_putin(self, access):

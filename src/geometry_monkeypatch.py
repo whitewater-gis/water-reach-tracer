@@ -1,26 +1,30 @@
 from arcgis.geometry import Geometry, Point, Polyline, find_transformation, project, SpatialReference
-from arcgis.geometry._types import HASARCPY, HASSHAPELY
 from shapely import ops
+import importlib
+
+# check what packages are available
+HASARCPY = True if importlib.util.find_spec("arcpy") else False
+HASSHAPELY = True if importlib.util.find_spec("shapely") else False
 
 
-# @classmethod
-# def from_shapely(cls, shapely_geometry, spatial_reference=None):
-#     """
-#     Creates a Python API Geometry object from a Shapely geometry object.
-#     :param shapely_geometry: Required Shapely Geometry
-#         Single instance of Shapely Geometry to be converted to ArcGIS
-#         Python API geometry instance.
-#     :param spatial_reference: Optional SpatialReference
-#         Defines the spatial reference for the output geometry.
-#     :return: Python API Geometry object
-#     """
-#     if HASSHAPELY:
-#         geometry = cls(shapely_geometry.__geo_interface__)
-#         if spatial_reference:
-#             geometry.spatial_reference = spatial_reference
-#         return geometry
-#     else:
-#         raise Exception('Shapely is required to execute from_shapely.')
+@classmethod
+def from_shapely(cls, shapely_geometry, spatial_reference=None):
+    """
+    Creates a Python API Geometry object from a Shapely geometry object.
+    :param shapely_geometry: Required Shapely Geometry
+        Single instance of Shapely Geometry to be converted to ArcGIS
+        Python API geometry instance.
+    :param spatial_reference: Optional SpatialReference
+        Defines the spatial reference for the output geometry.
+    :return: Python API Geometry object
+    """
+    if HASSHAPELY:
+        geometry = cls(shapely_geometry.__geo_interface__)
+        if spatial_reference:
+            geometry.spatial_reference = spatial_reference
+        return geometry
+    else:
+        raise Exception('Shapely is required to execute from_shapely.')
 
 
 def snap_to_line(self, polyline_geometry):
@@ -34,8 +38,8 @@ def snap_to_line(self, polyline_geometry):
     """
     if not isinstance(self, Point):
         raise Exception('Snap to line can only be performed on a Point geometry object.')
-    if not isinstance(polyline_geometry, Polyline):
-        raise Exception('Snapping target must be a single Polyline geometry object.')
+    if polyline_geometry.type != 'Polyline':
+        raise Exception('Snapping target must be a single ArcGIS Polyline geometry object.')
     if self.spatial_reference is None:
         raise Warning('The spatial reference for the point to be snapped to a line is not defined.')
     if polyline_geometry.spatial_reference is None:
@@ -51,7 +55,7 @@ def snap_to_line(self, polyline_geometry):
         polyline_geometry = polyline_geometry.as_shapely
         point_geometry = self.as_shapely
         snap_point = polyline_geometry.interpolate(polyline_geometry.project(point_geometry))
-        snap_point = Geometry.from_shapely(snap_point, self.spatial_reference)
+        snap_point = Point({'x': snap_point.x, 'y': snap_point.y, 'spatialReference': {'wkid': 4326}})
         return snap_point
 
     else:
@@ -177,7 +181,7 @@ def match_spatial_reference(self, match_geometry):
     return out_geom
 
 
-# Geometry.from_shapely = from_shapely
+Geometry.from_shapely = from_shapely
 Geometry.snap_to_line = snap_to_line
 Geometry.split_at_point = split_at_point
 Geometry.trim_at_point = trim_at_point
