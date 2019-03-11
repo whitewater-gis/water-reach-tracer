@@ -65,3 +65,6 @@ target/
 
 resources/rapids\.zip
 **/*.DS_Store
+
+# dotenv config file
+.env
