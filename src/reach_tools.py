@@ -15,6 +15,7 @@ purpose:    Provide the utilities to process and work with whitewater reach data
 """
 import requests
 import datetime
+import arcgis
 from arcgis.features import FeatureLayer, Feature, GeoAccessor, GeoSeriesAccessor
 from arcgis.geometry import Geometry, Point, Polyline
 from arcgis.gis import GIS, Item
@@ -24,14 +25,17 @@ import re
 from uuid import uuid4
 import shapely.ops
 import shapely.geometry
+import inspect
 
 # overcoming challenges of python 3.x relative imports
 try:
     from html2text import html2text
     from geometry_monkeypatch import *
+    import hydrology  # until my PR gets accepted
 except:
-    from .html2text import html2text
-    from .geometry_monkeypatch import *
+    from src.html2text import html2text
+    from src.geometry_monkeypatch import *
+    import src.hydrology as hydrology  # until my PR gets accepted
 
 
 class TraceException(Exception):
@@ -311,6 +315,12 @@ class Reach(object):
         self._reach_points = []
         self.agency = None
 
+    def __str__(self):
+        return f'{self.river_name} - {self.reach_name} - {self.difficulty}'
+
+    def __repr__(self):
+        return f'{self.__class__.__name__ } ({self.river_name} - {self.reach_name} - {self.difficulty})'
+
     @property
     def reach_points_as_features(self):
         """
@@ -338,7 +348,7 @@ class Reach(object):
             Centroid representing the reach location as a point.
         """
         # if the hydroline is defined, use the centroid of the hydroline
-        if type(self.geometry) is Polyline:
+        if isinstance(self.geometry, Polyline):
             return Geometry({
                 'x': np.mean([self.putin.geometry.x, self.takeout.geometry.x]),
                 'y': np.mean([self.putin.geometry.y, self.takeout.geometry.y]),
@@ -346,7 +356,7 @@ class Reach(object):
             })
 
         # if both accesses are defined, use the mean of the accesses
-        elif type(self.putin) is ReachPoint and type(self.takeout) is ReachPoint:
+        elif isinstance(self.putin, ReachPoint) and isinstance(self.takeout, ReachPoint):
 
             # create a point geometry using the average coordinates
             return Geometry({
@@ -364,13 +374,34 @@ class Reach(object):
         Provide the extent of the reach as (xmin, ymin, xmax, ymax)
         :return: Set (xmin, ymin, xmax, ymax)
         """
-        if self._geometry:
-            return self._geometry.extent
+        return (
+            min(self.putin.geometry.x, self.takeout.geometry.x),
+            min(self.putin.geometry.y, self.takeout.geometry.y),
+            max(self.putin.geometry.x, self.takeout.geometry.x),
+            max(self.putin.geometry.y, self.takeout.geometry.y),
+        )
+
+    @property
+    def reach_search(self):
+        if len(self.river_name) and len(self.reach_name):
+            return f'{self.river_name} {self.reach_name}'
+        elif len(self.river_name) and not len(self.reach_name):
+            return self.river_name
+        elif len(self.reach_name) and not len(self.river_name):
+            return self.reach_name
         else:
-            return (
-                min(self.putin.geometry.x, self.takeout.geometry.x), 
-                min(self.putin.geometry.y, self.takeout.geometry.y)
-            )
+            return ''
+
+    @property
+    def has_a_point(self):
+        if self.putin is None and self.takeout is  None:
+            return False
+
+        elif self.putin.geometry.type == 'Point' or self.putin.geometry == 'Point':
+            return True
+
+        else:
+            return False
 
     def _download_raw_json_from_aw(self):
         url = 'https://www.americanwhitewater.org/content/River/detail/id/{}/.json'.format(self.reach_id)
@@ -383,6 +414,8 @@ class Reach(object):
             if resp.status_code == 200 and len(resp.content):
                 return resp.json()
             elif resp.status_code == 200 and not len(resp.content):
+                return False
+            elif resp.status_code == 500:
                 return False
             else:
                 attempts = attempts + 1
@@ -451,6 +484,7 @@ class Reach(object):
 
         # apparently some people think it is a good idea to hit return more than twice...account for this foolishness
         cleanup = re.sub(r'\n{3,}', '\n\n', cleanup)
+        cleanup = re.sub('(.)\n(.)', '\g<1> \g<2>', cleanup)
 
         # get rid of any trailing newlines at end of entire text block
         cleanup = re.sub(r'\n+$', '', cleanup)
@@ -483,11 +517,13 @@ class Reach(object):
             self.length = float(length)
 
         # save the update datetime as a true datetime object
-        self.update_aw = datetime.datetime.strptime(reach_info['edited'], '%Y-%m-%d %H:%M:%S')
+        if reach_info['edited']:
+            self.update_aw = datetime.datetime.strptime(reach_info['edited'], '%Y-%m-%d %H:%M:%S')
 
         # process difficulty
-        self.difficulty = self._validate_aw_json(reach_info, 'class')
-        self._parse_difficulty_string(str(self.difficulty))
+        if len(reach_info['class']) and reach_info['class'].lower() != 'none':
+            self.difficulty = self._validate_aw_json(reach_info, 'class')
+            self._parse_difficulty_string(str(self.difficulty))
 
         # ensure putin coordinates are present, and if so, add the put-in point to the points list
         if reach_info['plon'] is not None and reach_info['plat'] is not None:
@@ -539,17 +575,56 @@ class Reach(object):
         return reach
 
     @classmethod
-    def get_from_arcgis(cls, reach_layer, reach_id):
-
-        if type(reach_layer) != ReachFeatureLayer:
-            raise Exception('reach_layer must be a ReachFeatureLayer')
+    def get_from_arcgis(cls, reach_id, reach_point_layer, reach_centroid_layer, reach_line_layer):
 
         # create instance of reach
         reach = cls(reach_id)
 
-        # get a dataframe, and since there is only one of each reach, get the first
-        reach_s = reach_layer.query_by_reach_id(reach_id).sdf.iloc[0]
-        # TODO: finish implementing get_from_arcgis method
+        # get a data frame for the centroid, since this is used to store the most reach information
+        df_centroid = reach_centroid_layer.query_by_reach_id(reach_id).sdf
+
+        # populate all relevant properties of the reach using the downloaded reach centroid
+        for column in df_centroid.columns:
+            if hasattr(reach, column):
+                setattr(reach, column, df_centroid.iloc[0][column])
+
+        # get the reach points as a spatially enabled dataframe
+        df_points = reach_point_layer.query_by_reach_id(reach_id).sdf
+
+        # iterate rows to create reach points in the parent reach object
+        for _, row in df_points.iterrows():
+
+            # get a dictionary of values, and swap out geometry for SHAPE
+            row_dict = row.to_dict()
+            row_dict['geometry'] = row_dict['SHAPE']
+
+            # get a list of ReachPoint input args
+            reach_point_args = inspect.getfullargspec(ReachPoint).args
+
+            # create a list of input arguments from the columns in the row
+            input_args = []
+            for arg in reach_point_args[1:]:
+                if arg in row_dict.keys():
+                    input_args.append(row_dict[arg])
+                else:
+                    input_args.append(None)
+
+            # use the input args to create a new reach point
+            reach_point = ReachPoint(*input_args)
+
+            # add the reach point to the reach points list
+            reach._reach_points.append(reach_point)
+
+        # try to get the line geometry, and use this for the reach geometry
+        fs_line = reach_line_layer.query_by_reach_id(reach_id)
+        if len(fs_line.features) > 0:
+            for this_feature in fs_line.features:
+                if this_feature._geom is not None:
+                    reach._geometry = Geometry(this_feature._geom)
+                    break
+
+        # return the reach object
+        return reach
 
     def _get_accesses_by_type(self, access_type):
 
@@ -578,7 +653,7 @@ class Reach(object):
             raise Exception('access type must be either "putin" or "takeout"')
 
         # update the list to NOT include the point we are adding
-        self.access_list = [pt for pt in self._reach_points if pt.subtype != access_type]
+        self._reach_points = [pt for pt in self._reach_points if pt.subtype != access_type]
 
         # ensure the new point being added is the right type
         access.point_type = 'access'
@@ -621,11 +696,11 @@ class Reach(object):
         access.set_type('intermediate')
         self.access_list.append(access)
 
-    def update_putin_takeout_and_trace(self, webmap=False):
+    def snap_putin_and_takeout_and_trace(self, webmap=False):
         """
         Update the putin and takeout coordinates, and trace the hydroline
         using the EPA's WATERS services.
-        :param map: Boolean - Optional
+        :param webmap: Boolean - Optional
             Return a web map widget if successful - useful for visualizing single reach.
         :return:
         """
@@ -633,68 +708,137 @@ class Reach(object):
         if self.putin is None or self.takeout is None:
             self.error = True
             self.notes = 'Reach does not appear to have both a put-in and take-out location defined.'
-            return False
+            status = False
 
         # get the snapped and corrected reach locations for the put-in
         self.putin.snap_to_nhdplus()
 
-        # ensure a putin was actually found
+        # ensure a putin was actually found using the EPA's WATERS service
         if self.putin.nhdplus_measure is None or self.putin.nhdplus_reach_id is None:
-            self.error = True
-            self.notes = 'Putin could not be located using EPA\'s WATERS service'
-            return False
 
-        # try to trace a few times, but if it doesn't work, error and report
-        attempts = 0
-        max_attempts = 5
+            nhd_status = False
 
-        try:
+            # do a little voodoo to get a feature set contining just the put-in
+            pts_df = self.reach_points_as_dataframe
+            putin_fs = pts_df[
+                (pts_df['point_type'] == 'access') & (pts_df['subtype'] == 'putin')
+            ].spatial.to_featureset()
 
-            # use the EPA navigate service to trace downstream
-            waters = WATERS()
-            trace_polyline = waters.get_downstream_navigation_polyline(self.putin.nhdplus_reach_id,
-                                                                       self.putin.nhdplus_measure)
+            # use the feature set to get a response from the watershed function using Esri's Hydrology service
+            wtrshd_resp = hydrology.watershed(
+                input_points=putin_fs,
+                point_id_field='reach_id',
+                snap_distance=100,
+                snap_distance_units='Meters')
 
-            # project the takeout geometry to the same spatial reference as the trace polyline
-            takeout_geom = self.takeout.geometry.match_spatial_reference(self.takeout.geometry)
+            # update the putin if a point was found
+            if len(wtrshd_resp._fields) and len(wtrshd_resp.snapped_points.features):
+                putin = self.putin
+                putin_geometry = wtrshd_resp.snapped_points.features[0].geometry
+                putin_geometry['spatialReference'] = wtrshd_resp.snapped_points.spatial_reference
+                putin.set_geometry(Geometry(putin_geometry))
+                self.set_putin(putin)
 
-            # snap the takeout geometry to the hydroline
-            takeout_geom = takeout_geom.snap_to_line(trace_polyline)
-
-            # update the takeout to the snapped point
-            self.takeout.set_geometry(takeout_geom)
-
-            # now dial in the coordinates using the EPA service - getting the rest of the attributes
-            self.takeout.snap_to_nhdplus()
-
-            # ensure a takeout was actually found
-            if self.takeout.nhdplus_measure is None or self.takeout.nhdplus_reach_id is None:
+            # if a putin was not found, quit swimming in the ocean
+            else:
                 self.error = True
-                self.notes = 'Takeout could not be located using EPS\'s WATERS service'
-                return False
+                self.notes = 'Put-in could not be located with neither WATERS nor Esri Hydrology services.'
 
-            # get the geometry between the putin and takeout
-            self._geometry = waters.get_updown_ptp_polyline(self.putin.nhdplus_reach_id,
-                                                            self.putin.nhdplus_measure,
-                                                            self.takeout.nhdplus_reach_id,
-                                                            self.takeout.nhdplus_measure)
+        # if the put-in was located using WATERS, flag as successful
+        else:
+            nhd_status = True
 
-        except:
+        if nhd_status == True:
 
-            # increment the attempt counter
-            attempts += 1
+            # try to trace a few times using WATERS, but if it doesn't work, error and report
+            attempts = 0
+            max_attempts = 5
 
-            # if tried too many times
-            if attempts == max_attempts:
-                self.error = True
-                self.notes = 'The reach could not be traced using the EPA\'s WATERS service.'
-                return False
+            try:
+
+                # use the EPA navigate service to trace downstream
+                waters = WATERS()
+                trace_polyline = waters.get_downstream_navigation_polyline(self.putin.nhdplus_reach_id,
+                                                                           self.putin.nhdplus_measure)
+
+                # project the takeout geometry to the same spatial reference as the trace polyline
+                takeout_geom = self.takeout.geometry.match_spatial_reference(self.takeout.geometry)
+
+                # snap the takeout geometry to the hydroline
+                takeout_geom = takeout_geom.snap_to_line(trace_polyline)
+
+                # update the takeout to the snapped point
+                self.takeout.set_geometry(takeout_geom)
+
+                # now dial in the coordinates using the EPA service - getting the rest of the attributes
+                self.takeout.snap_to_nhdplus()
+
+                # ensure a takeout was actually found
+                if self.takeout.nhdplus_measure is None or self.takeout.nhdplus_reach_id is None:
+                    self.error = True
+                    self.notes = 'Takeout could not be located using EPS\'s WATERS service'
+                    status = False
+
+                # get the geometry between the putin and takeout
+                self._geometry = waters.get_updown_ptp_polyline(self.putin.nhdplus_reach_id,
+                                                                self.putin.nhdplus_measure,
+                                                                self.takeout.nhdplus_reach_id,
+                                                                self.takeout.nhdplus_measure)
+
+                status = True
+
+            except:
+
+                # increment the attempt counter
+                attempts += 1
+
+                # if tried too many times
+                if attempts == max_attempts:
+                    self.error = True
+                    self.notes = 'The reach could not be traced using the EPA\'s WATERS service.'
+                    status = False
+
+        # if the put-in appears to be outside the area capable of being located using WATERS
+        else:
+
+            # do a little voodoo to get a feature set contining just the put-in
+            pts_df = self.reach_points_as_dataframe
+            putin_fs = pts_df[
+                (pts_df['point_type'] == 'access') & (pts_df['subtype'] == 'putin')
+            ].spatial.to_featureset()
+
+            # trace using Esri Hydrology services
+            attempts = 10
+            fail_count = 0
+            while fail_count < attempts:
+                try:
+                    trace_resp = hydrology.trace_downstream(putin_fs, point_id_field='reach_id')
+                    break
+                except:
+                    fail_count = fail_count + 1
+
+            # extract out the trace geometry
+            trace_geom = trace_resp.features[0].geometry
+            trace_geom['spatialReference'] = trace_resp.spatial_reference
+            trace_geom = Geometry(trace_geom)
+
+            # snap the takeout to the line
+            takeout = self.takeout
+            snap_geom = takeout.geometry.snap_to_line(trace_geom)
+            takeout.set_geometry(snap_geom)
+            self.set_takeout(takeout)
+
+            # trim the reach line to the takeout and save the geometry
+            line_geom = trace_geom.trim_at_point(takeout.geometry)
+            self._geometry = line_geom
+
+            status = True
 
         # if map result desired, return it
         if webmap:
             return self.plot_map()
         else:
-            return True
+            return status
 
     @property
     def geometry(self):
@@ -704,17 +848,32 @@ class Reach(object):
         """
         return self._geometry
 
+    def _get_feature_attributes(self):
+        """helper function for exporting features"""
+        srs = pd.Series(dir(self))
+        srs = srs[
+            (~srs.str.startswith('_'))
+            & (~srs.str.contains('as_'))
+            & (srs != 'putin')
+            & (srs != 'takeout')
+            & (srs != 'intermediate_accesses')
+            & (srs != 'geometry')
+            & (srs != 'has_a_point')
+            ]
+        srs = srs[srs.apply(lambda p: not hasattr(getattr(self, p), '__call__'))]
+        return {key: getattr(self, key) for key in srs}
+
     @property
     def as_feature(self):
         """
         Get the reach as an ArcGIS Python API Feature object.
         :return: ArcGIS Python API Feature object representing the reach.
         """
-        return Feature(
-            geometry=self._geometry,
-            attributes={key: vars(self)[key] for key in vars(self).keys()
-                        if key != '_geometry' and not key.startswith('_')}
-        )
+        if self.geometry:
+            feat = Feature(attributes=self._get_feature_attributes())
+        else:
+            feat = Feature(geometry=self.geometry, attributes=self._get_feature_attributes())
+        return feat
 
     @property
     def as_centroid_feature(self):
@@ -722,11 +881,7 @@ class Reach(object):
         Get a feature with the centroid geometry.
         :return: Feature with point geometry for the reach centroid.
         """
-        return Feature(
-            geometry=self.centroid,
-            attributes={key: vars(self)[key] for key in vars(self).keys()
-                        if key != '_geometry' and not key.startswith('_')}
-        )
+        return Feature(geometry=self.centroid, attributes=self._get_feature_attributes())
 
     def publish(self, gis, reach_line_layer, reach_centroid_layer, reach_point_layer):
         """
@@ -736,84 +891,112 @@ class Reach(object):
         :param reach_line_layer: ReachLayer with line geometry to publish to.
         :param reach_centroid_layer: ReachLayer with point geometry for the centroid to publish to.
         :param reach_point_layer: ReachPointLayer
-        :return: True if successful
+        :return: Boolean True if successful and False if not
         """
+
+        if not self.putin and not self.takeout:
+            return False
 
         if type(gis) != GIS:
             raise Exception('gis must be a valid GIS object.')
-        if type(reach_line_layer) != ReachFeatureLayer or type(reach_centroid_layer) != ReachFeatureLayer:
-            raise Exception('Reach line and point layers must be a valid ReachFeatureLayer instances.')
 
         # add the reach line if it was successfully traced
         if not self.error:
             resp_line = reach_line_layer.add_reach(self)
+            add_line = len(resp_line['addResults'])
 
         # regardless, add the centroid and points
         resp_centroid = reach_centroid_layer.add_reach(self)
+        add_centroid = len(resp_centroid['addResults'])
+
         resp_point = reach_point_layer.add_reach(self)
+        add_point = len(resp_point['addResults'])
 
-        # TODO: Add error checking responses ensuring all uploads worked
+        # check results for adds and return correct response
+        if not self.error and add_line and add_centroid and add_point:
+            return True
+        elif add_centroid and add_point:
+            return True
+        else:
+            return False
 
-        return True
-
-    def plot_map(self, gis=GIS()):
+    def plot_map(self, gis=None):
         """
         Display reach and accesses on web map widget.
         :param gis: ArcGIS Python API GIS object instance.
         :return: map widget
         """
+        if gis is None and arcgis.env.active_gis is not None:
+            gis = arcgis.env.active_gis
+        elif gis is None:
+            gis = GIS()
+
         webmap = gis.map()
         webmap.basemap = 'topo-vector'
         webmap.extent = {
-            'xmin': self.geometry.extent[0],
-            'ymin': self.geometry.extent[1],
-            'xmax': self.geometry.extent[2],
-            'ymax': self.geometry.extent[3],
+            'xmin': self.extent[0],
+            'ymin': self.extent[1],
+            'xmax': self.extent[2],
+            'ymax': self.extent[3],
             'spatialReference': {'wkid': 4326}
         }
-        webmap.draw(
-            shape=self.geometry,
-            symbol={
-                "type": "esriSLS",
-                "style": "esriSLSSolid",
-                "color": [0, 0, 255, 255],
-                "width": 1.5
-            }
-        )
-        webmap.draw(
-            shape=self.putin.geometry,
-            symbol={
-                "xoffset": 12,
-                "yoffset": 12,
-                "type": "esriPMS",
-                "url": "http://static.arcgis.com/images/Symbols/Basic/GreenFlag.png",
-                "contentType": "image/png",
-                "width": 24,
-                "height": 24
-            }
-        )
-        webmap.draw(
-            shape=self.takeout.geometry,
-            symbol={
-                "xoffset": 12,
-                "yoffset": 12,
-                "type": "esriPMS",
-                "url": "http://static.arcgis.com/images/Symbols/Basic/RedFlag.png",
-                "contentType": "image/png",
-                "width": 24,
-                "height": 24
-            }
-        )
-        webmap.draw(
-            shape=self.as_centroid_feature.geometry,
-            symbol={
-                "type": "esriPMS",
-                "url": "http://static.arcgis.com/images/Symbols/Basic/CircleX.png",
-                "contentType": "image/png",
-                "width": 24,
-                "height": 24
-            }
-        )
+        if self.geometry:
+            webmap.draw(
+                shape=self.geometry,
+                symbol={
+                    "type": "esriSLS",
+                    "style": "esriSLSSolid",
+                    "color": [0, 0, 255, 255],
+                    "width": 1.5
+                }
+            )
+        if self.putin.geometry:
+            webmap.draw(
+                shape=self.putin.geometry,
+                symbol={
+                    "xoffset": 12,
+                    "yoffset": 12,
+                    "type": "esriPMS",
+                    "url": "http://static.arcgis.com/images/Symbols/Basic/GreenFlag.png",
+                    "contentType": "image/png",
+                    "width": 24,
+                    "height": 24
+                }
+            )
+        if self.takeout.geometry:
+            webmap.draw(
+                shape=self.takeout.geometry,
+                symbol={
+                    "xoffset": 12,
+                    "yoffset": 12,
+                    "type": "esriPMS",
+                    "url": "http://static.arcgis.com/images/Symbols/Basic/RedFlag.png",
+                    "contentType": "image/png",
+                    "width": 24,
+                    "height": 24
+                }
+            )
+        if self.as_centroid_feature.geometry:
+            webmap.draw(
+                shape=self.as_centroid_feature.geometry,
+                symbol={
+                    "type": "esriPMS",
+                    "url": "http://static.arcgis.com/images/Symbols/Basic/CircleX.png",
+                    "contentType": "image/png",
+                    "width": 24,
+                    "height": 24
+                }
+            )
+
+        mpbx_otdrs = 'mapbox_outdoors'
+        if mpbx_otdrs in webmap.gallery_basemaps:
+            webmap.basemap = mpbx_otdrs
+
+        def _fix_extent(wbmp):
+            wbmp.extent = wbmp.extent - 1
+
+        webmap.on_draw_end(_fix_extent, True)
+
         return webmap
 
 
@@ -823,13 +1006,12 @@ class ReachPoint(object):
     """
 
     def __init__(self, reach_id, geometry, point_type, uid=None, subtype=None, name=None, side_of_river=None,
-                 collection_method=None, update_date=None, notes=None, description=None, difficulty=None):
+                 collection_method=None, update_date=None, notes=None, description=None, difficulty=None, **kwargs):
 
         self.reach_id = str(reach_id)
         self.point_type = point_type
         self.subtype = subtype
         self.name = name
-        self.side_of_river = side_of_river
         self.nhdplus_measure = None
         self.nhdplus_reach_id = None
         self.collection_method = collection_method
@@ -846,6 +1028,9 @@ class ReachPoint(object):
             self.uid = uuid4().hex
         else:
             self.uid = uid
+
+    def __repr__(self):
+        return f'{self.__class__.__name__ } ({self.reach_id} - {self.point_type} - {self.subtype})'
 
     @property
     def type_id(self):
@@ -932,6 +1117,9 @@ class ReachPoint(object):
 
 class _ReachIdFeatureLayer(FeatureLayer):
 
+    def __repr__(self):
+        return f'{self.__class__.__name__ } ({self.properties.name} @ {self.url})'
+
     @classmethod
     def from_item_id(cls, gis, item_id):
         url = Item(gis, item_id).layers[0].url
@@ -941,8 +1129,8 @@ class _ReachIdFeatureLayer(FeatureLayer):
     def from_url(cls, gis, url):
         return cls(url, gis)
 
-    def query_by_reach_id(self, reach_id):
-        return self.query("reach_id = '{}'".format(reach_id))
+    def query_by_reach_id(self, reach_id, spatial_reference={'wkid': 4326}):
+        return self.query(f"reach_id = '{reach_id}'", out_sr=spatial_reference)
 
     def flush(self):
         """

@@ -38,13 +38,17 @@ def snap_to_line(self, polyline_geometry):
     """
     if not isinstance(self, Point):
         raise Exception('Snap to line can only be performed on a Point geometry object.')
-    if polyline_geometry.type != 'Polyline':
+    if polyline_geometry.type.lower() != 'polyline':
         raise Exception('Snapping target must be a single ArcGIS Polyline geometry object.')
     if self.spatial_reference is None:
         raise Warning('The spatial reference for the point to be snapped to a line is not defined.')
     if polyline_geometry.spatial_reference is None:
         raise Warning('The spatial reference of the line being snapped to is not defined.')
-    if self.spatial_reference != polyline_geometry.spatial_reference:
+    if (self.spatial_reference != polyline_geometry.spatial_reference and
+            self.spatial_reference.wkid != polyline_geometry.spatial_reference.wkid and
+            self.spatial_reference.latestWkid != polyline_geometry.spatial_reference.wkid and
+            self.spatial_reference.wkid != polyline_geometry.spatial_reference.latestWkid and
+            self.spatial_reference.latestWkid != polyline_geometry.spatial_reference.latestWkid):
         raise Exception('The spatial reference for the point and the line are not the same.')
 
     if HASARCPY:
@@ -55,7 +59,7 @@ def snap_to_line(self, polyline_geometry):
         polyline_geometry = polyline_geometry.as_shapely
         point_geometry = self.as_shapely
         snap_point = polyline_geometry.interpolate(polyline_geometry.project(point_geometry))
-        snap_point = Point({'x': snap_point.x, 'y': snap_point.y, 'spatialReference': {'wkid': 4326}})
+        snap_point = Point({'x': snap_point.x, 'y': snap_point.y, 'spatialReference': self.spatial_reference})
         return snap_point
 
     else:
@@ -78,7 +82,11 @@ def split_at_point(self, point_geometry):
         raise Warning('The spatial reference for the line to be split is not defined.')
     if point_geometry.spatial_reference is None:
         raise Warning('The spatial reference of the point defining the split location is not defined.')
-    if self.spatial_reference != point_geometry.spatial_reference:
+    if (self.spatial_reference != point_geometry.spatial_reference and
+            self.spatial_reference.wkid != point_geometry.spatial_reference.wkid and
+            self.spatial_reference.latestWkid != point_geometry.spatial_reference.wkid and
+            self.spatial_reference.wkid != point_geometry.spatial_reference.latestWkid and
+            self.spatial_reference.latestWkid != point_geometry.spatial_reference.latestWkid):
         raise Exception('The spatial reference for the line and point are not the same.')
 
     #     if HASARCPY:
@@ -88,8 +96,10 @@ def split_at_point(self, point_geometry):
         linestring_geometry = self.as_shapely
         point_geometry = point_geometry.as_shapely
         split_result = ops.split(linestring_geometry, point_geometry)
-        polyline_list = [Geometry.from_shapely(line_string, self.spatial_reference)
-                         for line_string in split_result]
+        polyline_list = [Geometry({
+            'paths': line_string.__geo_interface__['coordinates'],
+            'spatialReference': self.spatial_reference})
+            for line_string in split_result]
         return polyline_list
 
     else:

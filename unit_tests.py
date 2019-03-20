@@ -1,8 +1,23 @@
 import unittest
 from arcgis.geometry import Geometry
 import pandas as pd
+from arcgis.gis import GIS, Item
+import os
+
+from dotenv import load_dotenv, find_dotenv
+load_dotenv(find_dotenv())
 
 from src.reach_tools import *
+import src.hydrology as hydrology
+
+gis = GIS(username=os.getenv('ARCGIS_USERNAME'), password=os.getenv('ARCGIS_PASSWORD'))
+url_reach_line = os.getenv('URL_REACH_LINE')
+url_reach_centroid = os.getenv('URL_REACH_CENTROID')
+url_reach_points = os.getenv('URL_REACH_POINT')
+
+lyr_reach_line = ReachFeatureLayer(url_reach_line, gis)
+lyr_reach_centroid = ReachFeatureLayer(url_reach_centroid, gis)
+lyr_reach_points = ReachPointFeatureLayer(url_reach_points, gis)
 
 class ReachLDub(unittest.TestCase):
     reach_id = 2156
@@ -56,7 +71,7 @@ class ReachLDub(unittest.TestCase):
 
     def test_trace_result(self):
         reach = Reach.get_from_aw(self.reach_id)
-        reach.update_putin_takeout_and_trace()
+        reach.snap_putin_and_takeout_and_trace()
         self.assertIsInstance(reach.geometry, Polyline)
 
 
@@ -111,8 +126,18 @@ class ReachCanyon(unittest.TestCase):
 
     def test_trace_result(self):
         reach = Reach.get_from_aw(self.reach_id)
-        reach.update_putin_takeout_and_trace()
+        reach.snap_putin_and_takeout_and_trace()
         self.assertIsInstance(reach.geometry, Polyline)
+
+
+class ReachAnon(unittest.TestCase):
+    reach_id = 5523
+
+    def test_publish(self):
+        reach = Reach.get_from_aw(self.reach_id)
+        reach.snap_putin_and_takeout_and_trace()
+        result = reach.publish(gis, lyr_reach_line, lyr_reach_centroid, lyr_reach_points)
+        self.assertTrue(result)
 
 
 class AccessPutin(unittest.TestCase):
@@ -214,13 +239,27 @@ class ReachOutOfUSA(unittest.TestCase):
     error flagged and described in notes. Longer term, should fall back to ArcGIS Online
     Service to trace using elevation service.
     """
-    reach_id = 1
+    reach_id = 3
 
     def test_trace_result(self):
         reach = Reach.get_from_aw(self.reach_id)
-        reach.update_putin_takeout_and_trace()
+        reach.snap_putin_and_takeout_and_trace()
         self.assertEqual(type(reach.centroid), Point)
 
+from arcgis.features import Feature
+
+class HydrologyUnitTest(unittest.TestCase):
+
+    reach_id = 1
+
+    def test_trace_number_one(self):
+
+        # reach = Reach.get_from_arcgis(self.reach_id, lyr_reach_points, lyr_reach_centroid, lyr_reach_line)
+        reach = Reach.get_from_aw(self.reach_id)
+
+        feat = reach.as_centroid_feature
+
+        self.assertTrue(len(reach))
 
 if __name__ == '__main__':
     unittest.main()
