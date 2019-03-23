@@ -365,6 +365,14 @@ class Reach(object):
                 'spatialReference': self.putin.geometry.spatial_reference
             })
 
+        # if only the putin is defined, use that
+        elif isinstance(self.putin, ReachPoint):
+            return self.putin.geometry
+
+        # and if on the takeout is defined, likely the person digitizing was taking too many hits from the bong
+        elif isinstance(self.takeout, ReachPoint):
+            return self.takeout.geometry
+
         else:
             return None
 
@@ -852,13 +860,13 @@ class Reach(object):
         """helper function for exporting features"""
         srs = pd.Series(dir(self))
         srs = srs[
-            (~srs.str.startswith('_'))
-            & (~srs.str.contains('as_'))
-            & (srs != 'putin')
-            & (srs != 'takeout')
-            & (srs != 'intermediate_accesses')
-            & (srs != 'geometry')
-            & (srs != 'has_a_point')
+                (~srs.str.startswith('_'))
+                & (~srs.str.contains('as_'))
+                & (srs != 'putin')
+                & (srs != 'takeout')
+                & (srs != 'intermediate_accesses')
+                & (srs != 'geometry')
+                & (srs != 'has_a_point')
             ]
         srs = srs[srs.apply(lambda p: not hasattr(getattr(self, p), '__call__'))]
         return {key: getattr(self, key) for key in srs}
