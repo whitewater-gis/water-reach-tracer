@@ -250,14 +250,18 @@ from arcgis.features import Feature
 
 class HydrologyUnitTest(unittest.TestCase):
 
-    reach_id = 1
+    reach_id = 3066
 
     def test_trace_number_one(self):
 
         # reach = Reach.get_from_arcgis(self.reach_id, lyr_reach_points, lyr_reach_centroid, lyr_reach_line)
-        reach = Reach.get_from_aw(self.reach_id)
+        gis = GIS(username=os.getenv('ARCGIS_USERNAME'), password=os.getenv('ARCGIS_PASSWORD'))
 
-        feat = reach.as_centroid_feature
+        lyr_reach_line = ReachFeatureLayer(url_reach_line, gis)
+        lyr_reach_centroid = ReachFeatureLayer(url_reach_centroid, gis)
+        lyr_reach_points = ReachPointFeatureLayer(url_reach_points, gis)
+
+        reach = Reach.get_from_aw(self.reach_id)
 
         self.assertTrue(len(reach))
 

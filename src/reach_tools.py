@@ -314,6 +314,13 @@ class Reach(object):
         self._geometry = None
         self._reach_points = []
         self.agency = None
+        self.gauge_max = None
+        self.gauge_min = None
+        self.gauge_observation = None
+        self.gauge_runnable = None
+        self.gauge_id = None
+        self.gauge_units = None
+        self.gauge_metric = None
 
     def __str__(self):
         return f'{self.river_name} - {self.reach_name} - {self.difficulty}'
@@ -524,6 +531,23 @@ class Reach(object):
         if length:
             self.length = float(length)
 
+        # helper to extract gauge information
+        def get_gauge_metric(gauge_info, metric):
+            if metric in gauge_info.keys() and gauge_info[metric] is not None:
+                return float(gauge_info[metric])
+
+        # get the gauge information
+        if len(self._reach_json['gauges']):
+            gauge_info = self._reach_json['gauges'][0]
+            self.gauge_min = get_gauge_metric(gauge_info, 'gauge_min')
+            self.gauge_max = get_gauge_metric(gauge_info, 'gauge_max')
+            self.gauge_observation = get_gauge_metric(gauge_info, 'gauge_reading')
+            self.gauge_id = gauge_info['gauge_id']
+            self.gauge_units = gauge_info['metric_unit']
+            self.gauge_metric = gauge_info['gauge_metric']
+            if self.gauge_min and self.gauge_max and self.gauge_observation:
+                self.gauge_runnable = self.gauge_min < self.gauge_observation < self.gauge_max
+
         # save the update datetime as a true datetime object
         if reach_info['edited']:
             self.update_aw = datetime.datetime.strptime(reach_info['edited'], '%Y-%m-%d %H:%M:%S')
@@ -596,39 +620,42 @@ class Reach(object):
             if hasattr(reach, column):
                 setattr(reach, column, df_centroid.iloc[0][column])
 
-        # get the reach points as a spatially enabled dataframe
-        df_points = reach_point_layer.query_by_reach_id(reach_id).sdf
+        # if reach points provided...is optional
+        if reach_point_layer:
 
-        # iterate rows to create reach points in the parent reach object
-        for _, row in df_points.iterrows():
+            # get the reach points as a spatially enabled dataframe
+            df_points = reach_point_layer.query_by_reach_id(reach_id).sdf
 
-            # get a dictionary of values, and swap out geometry for SHAPE
-            row_dict = row.to_dict()
-            row_dict['geometry'] = row_dict['SHAPE']
+            # iterate rows to create reach points in the parent reach object
+            for _, row in df_points.iterrows():
 
-            # get a list of ReachPoint input args
-            reach_point_args = inspect.getfullargspec(ReachPoint).args
+                # get a dictionary of values, and swap out geometry for SHAPE
+                row_dict = row.to_dict()
+                row_dict['geometry'] = row_dict['SHAPE']
 
-            # create a list of input arguments from the columns in the row
-            input_args = []
-            for arg in reach_point_args[1:]:
-                if arg in row_dict.keys():
-                    input_args.append(row_dict[arg])
-                else:
-                    input_args.append(None)
+                # get a list of ReachPoint input args
+                reach_point_args = inspect.getfullargspec(ReachPoint).args
 
-            # use the input args to create a new reach point
-            reach_point = ReachPoint(*input_args)
+                # create a list of input arguments from the columns in the row
+                input_args = []
+                for arg in reach_point_args[1:]:
+                    if arg in row_dict.keys():
+                        input_args.append(row_dict[arg])
+                    else:
+                        input_args.append(None)
 
-            # add the reach point to the reach points list
-            reach._reach_points.append(reach_point)
+                # use the input args to create a new reach point
+                reach_point = ReachPoint(*input_args)
+
+                # add the reach point to the reach points list
+                reach._reach_points.append(reach_point)
 
         # try to get the line geometry, and use this for the reach geometry
         fs_line = reach_line_layer.query_by_reach_id(reach_id)
         if len(fs_line.features) > 0:
             for this_feature in fs_line.features:
-                if this_feature._geom is not None:
-                    reach._geometry = Geometry(this_feature._geom)
+                if this_feature.geometry is not None:
+                    reach._geometry = Geometry(this_feature.geometry)
                     break
 
         # return the reach object
@@ -878,9 +905,9 @@ class Reach(object):
         :return: ArcGIS Python API Feature object representing the reach.
         """
         if self.geometry:
-            feat = Feature(attributes=self._get_feature_attributes())
-        else:
             feat = Feature(geometry=self.geometry, attributes=self._get_feature_attributes())
+        else:
+            feat = Feature(attributes=self._get_feature_attributes())
         return feat
 
     @property
@@ -1124,9 +1151,6 @@ class ReachPoint(object):
 
 
 class _ReachIdFeatureLayer(FeatureLayer):
-
-    def __repr__(self):
-        return f'{self.__class__.__name__ } ({self.properties.name} @ {self.url})'
 
     @classmethod
     def from_item_id(cls, gis, item_id):
