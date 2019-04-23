@@ -68,3 +68,6 @@ resources/rapids\.zip
 
 # dotenv config file
 .env
+
+# python config file
+**/*config.py

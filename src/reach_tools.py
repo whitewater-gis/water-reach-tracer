@@ -515,14 +515,22 @@ class Reach(object):
 
     def _parse_json(self, raw_json):
 
+        def remove_backslashes(input_str):
+            if isinstance(input_str, str) and len(input_str):
+                return input_str.replace('\\', '')
+            else:
+                return input_str
+
         # pluck out the stuff we are interested in
         self._reach_json = raw_json['CContainerViewJSON_view']['CRiverMainGadgetJSON_main']
 
         # pull a bunch of attributes through validation and save as properties
         reach_info = self._reach_json['info']
         self.river_name = self._validate_aw_json(reach_info, 'river')
-        self.reach_name = self._validate_aw_json(reach_info, 'section')
-        self.reach_alternate_name = self._validate_aw_json(reach_info, 'altname')
+
+        self.reach_name = remove_backslashes(self._validate_aw_json(reach_info, 'section'))
+        self.reach_alternate_name = remove_backslashes(self._validate_aw_json(reach_info, 'altname'))
+
         self.huc = self._validate_aw_json(reach_info, 'huc')
         self.description = self._validate_aw_json(reach_info, 'description')
         self.abstract = self._validate_aw_json(reach_info, 'abstract')
@@ -586,6 +594,14 @@ class Reach(object):
                     })
                 )
             )
+
+        # if there is not an abstract, create one from the description
+        if (not self.abstract or len(self.abstract) == 0) and (self.abstract and len(self.abstract) > 0):
+
+            # reomve all line returns and trim to 500 characters, and then trims to last space to ensure full word
+            self.abstract = self.description.replace('/n', '')[:500]
+            self.abstract = self.abstract[:self.abstract.rfind(' ')]
+            self.abstract = self.abstract + '...'
 
     @classmethod
     def get_from_aw(cls, reach_id):
@@ -1282,10 +1298,12 @@ class ReachFeatureLayer(_ReachIdFeatureLayer):
 
         # check the geometry type of the target feature service - point or line
         if self.properties.geometryType == 'esriGeometryPoint':
-            resp = self.edit_features(adds=[reach.as_centroid_feature])
+            point_feature = reach.as_centroid_feature
+            resp = self.edit_features(adds=[point_feature])
 
         elif self.properties.geometryType == 'esriGeometryPolyline':
-            resp = self.edit_features(adds=[reach.as_feature])
+            line_feature = reach.as_feature
+            resp = self.edit_features(adds=[line_feature])
 
         else:
             raise Exception('The feature service geometry type must be either point or polyline.')
@@ -1293,8 +1311,26 @@ class ReachFeatureLayer(_ReachIdFeatureLayer):
         return resp
 
     def update_reach(self, reach):
-        # TODO: implement update reach method to ReachFeatureLayer
-        # get uid of records matching reach_id and note feature count
-        # add features
-        # if response indicates adds successful, delete original records based on uid
-        return None
+
+        # get oid of records matching reach_id
+        oid_lst = self.query(f"reach_id = '{reach.reach_id}'",  return_ids_only=True)['objectIds']
+        print(oid_lst)
+
+        # if a feature already exists - hopefully the case, get the oid, add it to the feature, and push it
+        if len(oid_lst) > 0:
+
+            # check the geometry type of the target feature service - point or line
+            if self.properties.geometryType == 'esriGeometryPoint':
+                update_feat = reach.as_centroid_feature
+
+            elif self.properties.geometryType == 'esriGeometryPolyline':
+                update_feat = reach.as_feature
+
+            update_feat.attributes['OBJECTID'] = oid_lst[0]
+            resp = self.edit_features(updates=[update_feat])
+
+        # if the feature does not exist, add it
+        else:
+            resp = self.add_reach(reach)
+
+        return resp
