@@ -97,7 +97,7 @@ def split_at_point(self, point_geometry):
         point_geometry = point_geometry.as_shapely
         split_result = ops.split(linestring_geometry, point_geometry)
         polyline_list = [Geometry({
-            'paths': line_string.__geo_interface__['coordinates'],
+            'paths': [line_string.__geo_interface__['coordinates']],
             'spatialReference': self.spatial_reference})
             for line_string in split_result]
         return polyline_list
