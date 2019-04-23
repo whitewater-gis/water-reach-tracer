@@ -596,7 +596,7 @@ class Reach(object):
             )
 
         # if there is not an abstract, create one from the description
-        if (not self.abstract or len(self.abstract) == 0) and (self.abstract and len(self.abstract) > 0):
+        if (not self.abstract or len(self.abstract) == 0) and (self.description and len(self.description) > 0):
 
             # reomve all line returns and trim to 500 characters, and then trims to last space to ensure full word
             self.abstract = self.description.replace('/n', '')[:500]
@@ -1314,7 +1314,6 @@ class ReachFeatureLayer(_ReachIdFeatureLayer):
 
         # get oid of records matching reach_id
         oid_lst = self.query(f"reach_id = '{reach.reach_id}'",  return_ids_only=True)['objectIds']
-        print(oid_lst)
 
         # if a feature already exists - hopefully the case, get the oid, add it to the feature, and push it
         if len(oid_lst) > 0:
