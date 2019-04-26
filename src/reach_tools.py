@@ -314,13 +314,20 @@ class Reach(object):
         self._geometry = None
         self._reach_points = []
         self.agency = None
-        self.gauge_max = None
-        self.gauge_min = None
         self.gauge_observation = None
-        self.gauge_runnable = None
         self.gauge_id = None
         self.gauge_units = None
         self.gauge_metric = None
+        self.gauge_r0 = None
+        self.gauge_r1 = None
+        self.gauge_r2 = None
+        self.gauge_r3 = None
+        self.gauge_r4 = None
+        self.gauge_r5 = None
+        self.gauge_r6 = None
+        self.gauge_r7 = None
+        self.gauge_r8 = None
+        self.gauge_r9 = None
 
     def __str__(self):
         return f'{self.river_name} - {self.reach_name} - {self.difficulty}'
@@ -417,6 +424,201 @@ class Reach(object):
 
         else:
             return False
+
+    @property
+    def gauge_min(self):
+        gauge_min_lst = [self.gauge_r0, self.gauge_r1, self.gauge_r2, self.gauge_r3, self.gauge_r4, self.gauge_r5]
+        gauge_min_lst = [val for val in gauge_min_lst if val is not None]
+        if len(gauge_min_lst):
+            return min(gauge_min_lst)
+        else:
+            return None
+
+    @property
+    def gauge_max(self):
+        gauge_max_lst = [self.gauge_r4, self.gauge_r5, self.gauge_r6, self.gauge_r7, self.gauge_r8, self.gauge_r9]
+        gauge_max_lst = [val for val in gauge_max_lst if val is not None]
+        if len(gauge_max_lst):
+            return max(gauge_max_lst)
+        else:
+            return None
+
+    @property
+    def gauge_runnable(self):
+        if (self.gauge_min and self.gauge_max and self.gauge_observation) and \
+                (self.gauge_min < self.gauge_observation < self.gauge_max):
+            return True
+        else:
+            return False
+
+    @property
+    def gauge_stage(self):
+        metric_keys = ['gauge_r0', 'gauge_r1', 'gauge_r2', 'gauge_r3', 'gauge_r4', 'gauge_r5', 'gauge_r6', 'gauge_r7',
+                       'gauge_r8', 'gauge_r9']
+
+        def get_metrics(metric_keys):
+            metrics = [getattr(self, key) for key in metric_keys]
+            metrics = [val for val in metrics if val is not None]
+            metrics.sort()
+            return metrics
+
+        metrics = get_metrics(metric_keys)
+        low_metrics = get_metrics(metric_keys[:6])
+        high_metrics = get_metrics(metric_keys[5:])
+
+        if self.gauge_observation < metrics[0]:
+            return 'too low'
+        if self.gauge_observation > metrics[-1]:
+            return 'too high'
+
+        if len(metrics) == 2 or (len(metrics) == 1 and len(high_metrics) > 0):
+            return 'runnable'
+
+        if len(metrics) == 3:
+            if metrics[0] < self.gauge_observation < metrics[1]:
+                return 'lower runnable'
+            if metrics[1] < self.gauge_observation < metrics[2]:
+                return 'higher runnable'
+
+        if len(metrics) == 4:
+            if metrics[0] < self.gauge_observation < metrics[1]:
+                return 'low'
+            if metrics[1] < self.gauge_observation < metrics[2]:
+                return 'medium'
+            if metrics[2] < self.gauge_observation < metrics[3]:
+                return 'high'
+
+        if len(metrics) == 5 and len(low_metrics) > len(high_metrics):
+            if metrics[0] < self.gauge_observation < metrics[1]:
+                return 'very low'
+            if metrics[1] < self.gauge_observation < metrics[2]:
+                return 'medium low'
+            if metrics[2] < self.gauge_observation < metrics[3]:
+                return 'medium'
+            if metrics[3] < self.gauge_observation < metrics[4]:
+                return 'high'
+
+        if len(metrics) == 5 and len(low_metrics) < len(high_metrics):
+            if metrics[0] < self.gauge_observation < metrics[1]:
+                return 'low'
+            if metrics[1] < self.gauge_observation < metrics[2]:
+                return 'medium'
+            if metrics[2] < self.gauge_observation < metrics[3]:
+                return 'medium high'
+            if metrics[3] < self.gauge_observation < metrics[4]:
+                return 'very high'
+
+        if len(metrics) == 6:
+            if metrics[0] < self.gauge_observation < metrics[1]:
+                return 'low'
+            if metrics[1] < self.gauge_observation < metrics[2]:
+                return 'medium low'
+            if metrics[2] < self.gauge_observation < metrics[3]:
+                return 'medium'
+            if metrics[3] < self.gauge_observation < metrics[4]:
+                return 'medium high'
+            if metrics[4] < self.gauge_observation < metrics[5]:
+                return 'high'
+
+        if len(metrics) == 7 and len(low_metrics) > len(high_metrics):
+            if metrics[0] < self.gauge_observation < metrics[1]:
+                return 'very low'
+            if metrics[1] < self.gauge_observation < metrics[2]:
+                return 'low'
+            if metrics[2] < self.gauge_observation < metrics[3]:
+                return 'medium low'
+            if metrics[3] < self.gauge_observation < metrics[4]:
+                return 'medium'
+            if metrics[4] < self.gauge_observation < metrics[5]:
+                return 'medium high'
+            if metrics[5] < self.gauge_observation < metrics[6]:
+                return 'high'
+
+        if len(metrics) == 7 and len(low_metrics) < len(high_metrics):
+            if metrics[0] < self.gauge_observation < metrics[1]:
+                return 'low'
+            if metrics[1] < self.gauge_observation < metrics[2]:
+                return 'medium low'
+            if metrics[2] < self.gauge_observation < metrics[3]:
+                return 'medium'
+            if metrics[3] < self.gauge_observation < metrics[4]:
+                return 'medium high'
+            if metrics[4] < self.gauge_observation < metrics[5]:
+                return 'high'
+            if metrics[5] < self.gauge_observation < metrics[6]:
+                return 'very high'
+
+        if len(metrics) == 8:
+            if metrics[0] < self.gauge_observation < metrics[1]:
+                return 'very low'
+            if metrics[1] < self.gauge_observation < metrics[2]:
+                return 'low'
+            if metrics[2] < self.gauge_observation < metrics[3]:
+                return 'medium low'
+            if metrics[3] < self.gauge_observation < metrics[4]:
+                return 'medium'
+            if metrics[4] < self.gauge_observation < metrics[5]:
+                return 'medium high'
+            if metrics[5] < self.gauge_observation < metrics[6]:
+                return 'high'
+            if metrics[6] < self.gauge_observation < metrics[7]:
+                return 'very high'
+
+        if len(metrics) == 9 and len(low_metrics) > len(high_metrics):
+            if metrics[0] < self.gauge_observation < metrics[1]:
+                return 'extremely low'
+            if metrics[1] < self.gauge_observation < metrics[2]:
+                return 'very low'
+            if metrics[2] < self.gauge_observation < metrics[3]:
+                return 'low'
+            if metrics[3] < self.gauge_observation < metrics[4]:
+                return 'medium low'
+            if metrics[4] < self.gauge_observation < metrics[5]:
+                return 'medium'
+            if metrics[5] < self.gauge_observation < metrics[6]:
+                return 'medium high'
+            if metrics[6] < self.gauge_observation < metrics[7]:
+                return 'high'
+            if metrics[7] < self.gauge_observation < metrics[8]:
+                return 'very high'
+
+        if len(metrics) == 9 and len(low_metrics) > len(high_metrics):
+            if metrics[0] < self.gauge_observation < metrics[1]:
+                return 'very low'
+            if metrics[1] < self.gauge_observation < metrics[2]:
+                return 'low'
+            if metrics[2] < self.gauge_observation < metrics[3]:
+                return 'medium low'
+            if metrics[3] < self.gauge_observation < metrics[4]:
+                return 'medium'
+            if metrics[4] < self.gauge_observation < metrics[5]:
+                return 'medium high'
+            if metrics[5] < self.gauge_observation < metrics[6]:
+                return 'high'
+            if metrics[6] < self.gauge_observation < metrics[7]:
+                return 'very high'
+            if metrics[7] < self.gauge_observation < metrics[8]:
+                return 'extremely high'
+
+        if len(metrics) == 10:
+            if metrics[0] < self.gauge_observation < metrics[1]:
+                return 'extremely low'
+            if metrics[1] < self.gauge_observation < metrics[2]:
+                return 'very low'
+            if metrics[2] < self.gauge_observation < metrics[3]:
+                return 'low'
+            if metrics[3] < self.gauge_observation < metrics[4]:
+                return 'medium low'
+            if metrics[4] < self.gauge_observation < metrics[5]:
+                return 'medium'
+            if metrics[5] < self.gauge_observation < metrics[6]:
+                return 'medium high'
+            if metrics[6] < self.gauge_observation < metrics[7]:
+                return 'high'
+            if metrics[7] < self.gauge_observation < metrics[8]:
+                return 'very high'
+            if metrics[8] < self.gauge_observation < metrics[9]:
+                return 'extremely high'
 
     def _download_raw_json_from_aw(self):
         url = 'https://www.americanwhitewater.org/content/River/detail/id/{}/.json'.format(self.reach_id)
@@ -547,14 +749,16 @@ class Reach(object):
         # get the gauge information
         if len(self._reach_json['gauges']):
             gauge_info = self._reach_json['gauges'][0]
-            self.gauge_min = get_gauge_metric(gauge_info, 'gauge_min')
-            self.gauge_max = get_gauge_metric(gauge_info, 'gauge_max')
             self.gauge_observation = get_gauge_metric(gauge_info, 'gauge_reading')
             self.gauge_id = gauge_info['gauge_id']
             self.gauge_units = gauge_info['metric_unit']
             self.gauge_metric = gauge_info['gauge_metric']
-            if self.gauge_min and self.gauge_max and self.gauge_observation:
-                self.gauge_runnable = self.gauge_min < self.gauge_observation < self.gauge_max
+
+            for rng in self._reach_json['guagesummary']['ranges']:
+                if rng['range_min'] and rng['gauge_min']:
+                    setattr(self, f"gauge_{rng['range_min'].lower()}", float(rng['gauge_min']))
+                if rng['range_max'] and rng['gauge_max']:
+                    setattr(self, f"gauge_{rng['range_max'].lower()}", float(rng['gauge_max']))
 
         # save the update datetime as a true datetime object
         if reach_info['edited']:
@@ -596,6 +800,7 @@ class Reach(object):
             )
 
         # if there is not an abstract, create one from the description
+        # TODO: use HTML stripper - https://stackoverflow.com/questions/753052/strip-html-from-strings-in-python
         if (not self.abstract or len(self.abstract) == 0) and (self.description and len(self.description) > 0):
 
             # reomve all line returns and trim to 500 characters, and then trims to last space to ensure full word
