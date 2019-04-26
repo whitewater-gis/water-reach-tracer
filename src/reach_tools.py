@@ -17,7 +17,11 @@ import requests
 import datetime
 import arcgis
 from arcgis.features import FeatureLayer, Feature, GeoAccessor, GeoSeriesAccessor
-from arcgis.geometry import Geometry, Point, Polyline
+from arcgis.geometry import Geometry, Point, Polyline, Polygon
+from arcgis.gis import GIS
+from arcgis.env import active_gis
+from scipy.interpolate import splprep, splev
+from copy import deepcopy
 from arcgis.gis import GIS, Item
 import pandas as pd
 import numpy as np
@@ -36,6 +40,86 @@ except:
     from src.html2text import html2text
     from src.geometry_monkeypatch import *
     import src.hydrology as hydrology  # until my PR gets accepted
+
+
+# mokeypatching the Geometry object since this is only supported if arcpy is present
+def _smooth(self):
+    if not isinstance(self, Polygon) and not isinstance(self, Polyline):
+        raise Exception('Smoothing can only be performed on Esri Polygon or Polyline geometry types.')
+
+    gis = active_gis
+    if gis is None:
+        gis = GIS()
+
+    def densify(in_geom):
+        url = gis.properties.helperServices.geometry.url + '/densify'
+        geom = deepcopy(in_geom)
+        geom_key = list(geom.keys())[0]
+        params = {
+            'f': 'json',
+            'geometries': {
+                'geometryType': 'esriGeometryPolyline',
+                'geometries': [
+                    {geom_key: geom[geom_key]}
+                ]
+            },
+            'sr': {'wkid': 4326},
+            'maxSegmentLength': 0.009
+        }
+        resp = gis._con.post(url, params)
+        geom[geom_key] = resp['geometries'][0][geom_key]
+        return geom
+
+    def simplify(in_geom):
+        url = gis.properties.helperServices.geometry.url + '/simplify'
+        geom = deepcopy(in_geom)
+        geom_key = list(geom.keys())[0]
+        params = {
+            'f': 'json',
+            'geometries': {
+                'geometryType': 'esriGeometryPolyline',
+                'geometries': [
+                    {geom_key: geom[geom_key]}
+                ]
+            },
+            'sr': {'wkid': 4326}
+        }
+        resp = gis._con.post(url, params)
+        geom[geom_key] = resp['geometries'][0][geom_key]
+        return geom
+
+    def smooth_coord_lst(coord_lst):
+        x_lst, y_lst = zip(*coord_lst)
+
+        smoothing = 0.0005
+        spline_order = 2
+        knot_estimate = -1
+        tck, fp, ier, msg = splprep([x_lst, y_lst], s=smoothing, k=spline_order, nest=knot_estimate, full_output=1)
+
+        zoom = 5
+        n_len = len(x_lst) * zoom
+        x_ip, y_ip = splev(np.linspace(0, 1, n_len), tck[0])
+
+        return [[x_ip[i], y_ip[i]] for i in range(0, len(x_ip))]
+
+    # densify the geometry to help with too much deflection when smoothing
+    new_geom = densify(self)
+
+    # get the dictionary key containing the geometry coordinate pairs
+    geom_key = list(new_geom.keys())[0]
+
+    # use the key to get all the coordinate pairs
+    coord_lst = new_geom[geom_key]
+    new_geom[geom_key] = [smooth_coord_lst(coords) for coords in new_geom[geom_key]]
+
+    # simplify the geometry to remove unnecessary vertices
+    new_geom = simplify(new_geom)
+
+    # return smoothed geometry
+    return new_geom
+
+# apply the monkeypatch
+Geometry.smooth = _smooth
 
 
 class TraceException(Exception):
@@ -1084,9 +1168,11 @@ class Reach(object):
             takeout.set_geometry(snap_geom)
             self.set_takeout(takeout)
 
-            # trim the reach line to the takeout and save the geometry
+            # trim the reach line to the takeout
             line_geom = trace_geom.trim_at_point(takeout.geometry)
-            self._geometry = line_geom
+
+            # smooth the geometry since the elevation tracing can appear a little jagged
+            self._geometry = line_geom.smooth()
 
             status = True
 
