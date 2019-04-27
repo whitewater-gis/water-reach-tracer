@@ -28,7 +28,9 @@ def _evaluate_spatial_input(input_points):
 
     elif isinstance(input_points, DataFrame) and not _is_geoenabled(input_points):
         raise Exception(
-            'input_points is a DataFrame, but does not appear to be spatially enabled. Using the <df>.spatial.set_geometry(col, sr=None) may help. (https://esri.github.io/arcgis-python-api/apidoc/html/arcgis.features.toc.html#arcgis.features.GeoAccessor.set_geometry)')
+            'input_points is a DataFrame, but does not appear to be spatially enabled. Using the <df>.spatial.set_'
+            'geometry(col, sr=None) may help. (https://esri.github.io/arcgis-python-api/apidoc/html/arcgis.features.'
+            'toc.html#arcgis.features.GeoAccessor.set_geometry)')
 
     else:
         raise Exception('input_points must be either a FeatureSet or Spatially Enabled DataFrame instead of {}'.format(
@@ -115,12 +117,13 @@ def trace_downstream(input_points, point_id_field=None, source_database='Finest'
 
     if source_database not in ['Finest', '10m', '30m', '90m']:
         raise Exception(
-            'source_database must be either "Finest", "10m", "30m", or "90m". {} does not appear to be one of these.'.format(
-                source_database))
+            'source_database must be either "Finest", "10m", "30m", or "90m". {} does not appear to be one of '
+            'these.'.format(source_database))
 
     if gis is None and arcgis.env.active_gis is None:
         raise Exception(
-            'GIS must be defined either by directly passing in a GIS object created using credentials, or one must already be created in the active Python session.')
+            'GIS must be defined either by directly passing in a GIS object created using credentials, or one must '
+            'already be created in the active Python session.')
     elif gis is None:
         gis = arcgis.env.active_gis
 
@@ -216,7 +219,8 @@ def watershed(input_points, point_id_field=None, snap_distance=10, snap_distance
 
     if gis is None and arcgis.env.active_gis is None:
         raise Exception(
-            'GIS must be defined either by directly passing in a GIS object created using credentials, or one must already be created in the active Python session.')
+            'GIS must be defined either by directly passing in a GIS object created using credentials, or one must '
+            'already be created in the active Python session.')
     elif gis is None:
         gis = arcgis.env.active_gis
 

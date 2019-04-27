@@ -250,7 +250,7 @@ from arcgis.features import Feature
 
 class HydrologyUnitTest(unittest.TestCase):
 
-    reach_id = 3066
+    reach_id = 1
 
     def test_trace_number_one(self):
 
@@ -262,6 +262,7 @@ class HydrologyUnitTest(unittest.TestCase):
         lyr_reach_points = ReachPointFeatureLayer(url_reach_points, gis)
 
         reach = Reach.get_from_aw(self.reach_id)
+        reach.snap_putin_and_takeout_and_trace()
 
         self.assertTrue(len(reach))
 

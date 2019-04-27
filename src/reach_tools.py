@@ -30,6 +30,7 @@ from uuid import uuid4
 import shapely.ops
 import shapely.geometry
 import inspect
+from html.parser import HTMLParser
 
 # overcoming challenges of python 3.x relative imports
 try:
@@ -42,14 +43,38 @@ except:
     import src.hydrology as hydrology  # until my PR gets accepted
 
 
-# mokeypatching the Geometry object since this is only supported if arcpy is present
-def _smooth(self):
-    if not isinstance(self, Polygon) and not isinstance(self, Polyline):
+# helper for cleaning up HTML strings
+# From - https://stackoverflow.com/questions/753052/strip-html-from-strings-in-python
+class _MLStripper(HTMLParser):
+    def __init__(self):
+        self.reset()
+        self.strict = False
+        self.convert_charrefs = True
+        self.fed = []
+
+    def handle_data(self, d):
+        self.fed.append(d)
+
+    def get_data(self):
+        return ''.join(self.fed)
+
+
+def _strip_tags(html):
+    s = _MLStripper()
+    s.feed(html)
+    return s.get_data()
+
+
+# smoothing function for geometry
+def _smooth_geometry(geom):
+
+    if not isinstance(geom, Polygon) and not isinstance(geom, Polyline):
         raise Exception('Smoothing can only be performed on Esri Polygon or Polyline geometry types.')
 
-    gis = active_gis
-    if gis is None:
-        gis = GIS()
+    if not active_gis:
+        raise Exception('There must be an active GIS session for geometry smoothing to work.')
+    else:
+        gis = active_gis
 
     def densify(in_geom):
         url = gis.properties.helperServices.geometry.url + '/densify'
@@ -103,13 +128,12 @@ def _smooth(self):
         return [[x_ip[i], y_ip[i]] for i in range(0, len(x_ip))]
 
     # densify the geometry to help with too much deflection when smoothing
-    new_geom = densify(self)
+    new_geom = densify(geom)
 
     # get the dictionary key containing the geometry coordinate pairs
     geom_key = list(new_geom.keys())[0]
 
     # use the key to get all the coordinate pairs
-    coord_lst = new_geom[geom_key]
     new_geom[geom_key] = [smooth_coord_lst(coords) for coords in new_geom[geom_key]]
 
     # simplify the geometry to remove unnecessary vertices
@@ -117,9 +141,6 @@ def _smooth(self):
 
     # return smoothed geometry
     return new_geom
-
-# apply the monkeypatch
-Geometry.smooth = _smooth
 
 
 class TraceException(Exception):
@@ -412,12 +433,49 @@ class Reach(object):
         self.gauge_r7 = None
         self.gauge_r8 = None
         self.gauge_r9 = None
+        self.tracing_method = None
 
     def __str__(self):
         return f'{self.river_name} - {self.reach_name} - {self.difficulty}'
 
     def __repr__(self):
         return f'{self.__class__.__name__ } ({self.river_name} - {self.reach_name} - {self.difficulty})'
+
+    @property
+    def putin_x(self):
+        return self.putin.geometry.x
+
+    @property
+    def putin_y(self):
+        return self.putin.geometry.y
+
+    @property
+    def takeout_x(self):
+        return self.takeout.geometry.x
+
+    @property
+    def takeout_y(self):
+        return self.takeout.geometry.y
+
+    @property
+    def difficulty_filter(self):
+        lookup_dict = {
+            'I':    1.1,
+            'I+':   1.2,
+            'II-':  2.0,
+            'II':   2.1,
+            'II+':  2.2,
+            'III-': 3.0,
+            'III':  3.1,
+            'III+': 3.2,
+            'IV-':  4.0,
+            'IV':   4.1,
+            'IV+':  4.2,
+            'V-':   5.0,
+            'V':    5.1,
+            'V+':   5.3
+        }
+        return lookup_dict[self.difficulty_maximum]
 
     @property
     def reach_points_as_features(self):
@@ -542,11 +600,14 @@ class Reach(object):
 
         def get_metrics(metric_keys):
             metrics = [getattr(self, key) for key in metric_keys]
-            metrics = [val for val in metrics if val is not None]
+            metrics = list(set(val for val in metrics if val is not None))
             metrics.sort()
             return metrics
 
         metrics = get_metrics(metric_keys)
+        if not len(metrics):
+            return None
+
         low_metrics = get_metrics(metric_keys[:6])
         high_metrics = get_metrics(metric_keys[5:])
 
@@ -884,11 +945,11 @@ class Reach(object):
             )
 
         # if there is not an abstract, create one from the description
-        # TODO: use HTML stripper - https://stackoverflow.com/questions/753052/strip-html-from-strings-in-python
         if (not self.abstract or len(self.abstract) == 0) and (self.description and len(self.description) > 0):
 
-            # reomve all line returns and trim to 500 characters, and then trims to last space to ensure full word
-            self.abstract = self.description.replace('/n', '')[:500]
+            # reomve all line returns, html tags, trim to 500 characters, and trim to last space to ensure full word
+            self.abstract = self._cleanup_string(_strip_tags(reach_info['description']))
+            self.abstract = self.abstract.replace('\\', '').replace('/n', '')[:500]
             self.abstract = self.abstract[:self.abstract.rfind(' ')]
             self.abstract = self.abstract + '...'
 
@@ -1036,14 +1097,19 @@ class Reach(object):
         access.set_type('intermediate')
         self.access_list.append(access)
 
-    def snap_putin_and_takeout_and_trace(self, webmap=False):
+    def snap_putin_and_takeout_and_trace(self, webmap=False, gis=None):
         """
         Update the putin and takeout coordinates, and trace the hydroline
         using the EPA's WATERS services.
         :param webmap: Boolean - Optional
             Return a web map widget if successful - useful for visualizing single reach.
+        :param gis: Active GIS for performing hydrology analysis.
         :return:
         """
+        # set the active GIS to the gis object if no other is provided
+        if not gis:
+            gis = active_gis
+
         # ensure a putin and takeout actually were found
         if self.putin is None or self.takeout is None:
             self.error = True
@@ -1058,7 +1124,7 @@ class Reach(object):
 
             nhd_status = False
 
-            # do a little voodoo to get a feature set contining just the put-in
+            # do a little voodoo to get a feature set containing just the put-in
             pts_df = self.reach_points_as_dataframe
             putin_fs = pts_df[
                 (pts_df['point_type'] == 'access') & (pts_df['subtype'] == 'putin')
@@ -1069,7 +1135,9 @@ class Reach(object):
                 input_points=putin_fs,
                 point_id_field='reach_id',
                 snap_distance=100,
-                snap_distance_units='Meters')
+                snap_distance_units='Meters',
+                gis=gis
+            )
 
             # update the putin if a point was found
             if len(wtrshd_resp._fields) and len(wtrshd_resp.snapped_points.features):
@@ -1126,6 +1194,7 @@ class Reach(object):
                                                                 self.takeout.nhdplus_measure)
 
                 status = True
+                self.tracing_method = 'EPA WATERS NHD Plus v2'
 
             except:
 
@@ -1171,10 +1240,11 @@ class Reach(object):
             # trim the reach line to the takeout
             line_geom = trace_geom.trim_at_point(takeout.geometry)
 
-            # smooth the geometry since the elevation tracing can appear a little jagged
-            self._geometry = line_geom.smooth()
+            # smooth the geometry since the hydrology tracing can appear a little jagged
+            self._geometry = _smooth_geometry(line_geom)
 
             status = True
+            self.tracing_method = "ArcGIS Online Hydrology Services"
 
         # if map result desired, return it
         if webmap:
@@ -1225,7 +1295,7 @@ class Reach(object):
         """
         return Feature(geometry=self.centroid, attributes=self._get_feature_attributes())
 
-    def publish(self, gis, reach_line_layer, reach_centroid_layer, reach_point_layer):
+    def publish(self, reach_line_layer, reach_centroid_layer, reach_point_layer):
         """
         Publish the reach to three feature layers; the reach line layer, the reach centroid layer,
         and the reach points layer.
@@ -1235,12 +1305,8 @@ class Reach(object):
         :param reach_point_layer: ReachPointLayer
         :return: Boolean True if successful and False if not
         """
-
         if not self.putin and not self.takeout:
             return False
-
-        if type(gis) != GIS:
-            raise Exception('gis must be a valid GIS object.')
 
         # add the reach line if it was successfully traced
         if not self.error:
@@ -1258,6 +1324,37 @@ class Reach(object):
         if not self.error and add_line and add_centroid and add_point:
             return True
         elif add_centroid and add_point:
+            return True
+        else:
+            return False
+
+    def publish_updates(self, reach_line_layer, reach_centroid_layer, reach_point_layer):
+        """
+        Based on the current status of the reach, push updates to the online Feature Services.
+        :param reach_line_layer: ReachLayer with line geometry to publish to.
+        :param reach_centroid_layer: ReachLayer with point geometry for the centroid to publish to.
+        :param reach_point_layer: ReachPointLayer
+        :return: Boolean True if successful and False if not
+        """
+        if not self.putin and not self.takeout:
+            return False
+
+        resp_line = reach_line_layer.update_reach(self)
+        update_line = len(resp_line['updateResults'])
+
+        resp_centroid = reach_centroid_layer.update_reach(self)
+        update_centroid = len(resp_centroid['updateResults'])
+
+        resp_putin = reach_point_layer.update_putin(self.putin)
+        update_putin = len(resp_putin['updateResults'])
+
+        resp_takeout = reach_point_layer.update_takeout(self.takeout)
+        update_takeout = len(resp_takeout['updateResults'])
+
+        # check results for adds and return correct response
+        if update_line and update_centroid and update_putin and update_takeout:
+            return True
+        elif update_centroid and update_putin and update_takeout:
             return True
         else:
             return False
@@ -1511,28 +1608,27 @@ class ReachPointFeatureLayer(_ReachIdFeatureLayer):
         # TODO: handle the response
         return None
 
-    def _update_putin_takeout(self, access):
-        # TODO: Implement _update_putin_takeout for ReachPointFeatureLayer
-        # query to get the putin by reach_id and access type
-        access_fs = self.query(f"reach_id = '{access.reach_id}' AND type = '{access.point_type}'")
-
-        # update the feature set with the updated access properties
-        # push the update and return boolean success or failure
-        return None
+    def update_putin_or_takeout(self, access):
+        access_resp = self.query(
+            f"reach_id = '{access.reach_id}' AND point_type = 'access' AND subtype = '{access.subtype}'",
+            return_ids_only=True)['objectIds']
+        if len(access_resp):
+            oid_access = access_resp[0]
+            access_feature = access.as_feature
+            access_feature.attributes['OBJECTID'] = oid_access
+            return self.edit_features(updates=[access_feature])
+        else:
+            return self.edit_features(adds=[access.as_feature])
 
     def update_putin(self, access):
-        # TODO: Implement update_putin for ReachPointFeatureLayer
-        return None
+        if not access.subtype == 'putin':
+            raise Exception('A put-in access point must be provided to update the put-in.')
+        return self.update_putin_or_takeout(access)
 
     def update_takeout(self, access):
-        # TODO: Implement update_takeout for ReachPointFeatureLayer
-        return None
-
-    def get_putin_sdf(self, reach_id):
-        return self.query("type = 'putin' AND reach_id = '{}'".format(reach_id)).sdf
-
-    def get_takeout_sdf(self, reach_id):
-        return self.query("type = 'takeout' AND reach_id = '{}'".format(reach_id)).sdf
+        if not access.subtype == 'takeout':
+            raise Exception('A take-out access point must be provided to update the take-out.')
+        return self.update_putin_or_takeout(access)
 
     def _create_reach_point_from_series(self, reach_point):
 
