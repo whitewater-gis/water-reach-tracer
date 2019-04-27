@@ -70,6 +70,8 @@ resources/rapids\.zip
 .env
 
 # python config file
+config.py
 **/*config.py
+
 .python_packages
 water-reach-tracer.zip
