@@ -246,7 +246,6 @@ class ReachOutOfUSA(unittest.TestCase):
         reach.snap_putin_and_takeout_and_trace()
         self.assertEqual(type(reach.centroid), Point)
 
-from arcgis.features import Feature
 
 class HydrologyUnitTest(unittest.TestCase):
 
@@ -265,6 +264,15 @@ class HydrologyUnitTest(unittest.TestCase):
         reach.snap_putin_and_takeout_and_trace()
 
         self.assertTrue(len(reach))
+
+
+class TestFault(unittest.TestCase):
+
+    def test_run_reach(self):
+        reach_id = 153
+        reach = Reach.get_from_aw(reach_id)
+        reach.snap_putin_and_takeout_and_trace()
+        self.assertTrue(reach)
 
 if __name__ == '__main__':
     unittest.main()

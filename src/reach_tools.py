@@ -206,7 +206,7 @@ class WATERS(object):
 
             # construct a Point geometry along with sending back the ComID and Measure needed for tracing
             return {
-                "geometry": Geometry({'x': coordinates[0], 'y':coordinates[1], 'spatialReference':{"wkid": 4326}}),
+                "geometry": Geometry({'x': coordinates[0], 'y': coordinates[1], 'spatialReference': {"wkid": 4326}}),
                 "measure": response_json["output"]["ary_flowlines"][0]["fmeasure"],
                 "id": response_json["output"]["ary_flowlines"][0]["comid"]
             }
@@ -235,7 +235,6 @@ class WATERS(object):
             "pReturnFlowlineAttr": True,
             "f": "json"
         }
-
 
         # since requests don't always work, enable repeated tries up to 10
         attempts = 0
@@ -434,6 +433,7 @@ class Reach(object):
         self.gauge_r8 = None
         self.gauge_r9 = None
         self.tracing_method = None
+        self.trace_source = None
 
     def __str__(self):
         return f'{self.river_name} - {self.reach_name} - {self.difficulty}'
@@ -558,7 +558,7 @@ class Reach(object):
 
     @property
     def has_a_point(self):
-        if self.putin is None and self.takeout is  None:
+        if self.putin is None and self.takeout is None:
             return False
 
         elif self.putin.geometry.type == 'Point' or self.putin.geometry == 'Point':
@@ -1114,7 +1114,7 @@ class Reach(object):
         if self.putin is None or self.takeout is None:
             self.error = True
             self.notes = 'Reach does not appear to have both a put-in and take-out location defined.'
-            status = False
+            trace_status = False
 
         # get the snapped and corrected reach locations for the put-in
         self.putin.snap_to_nhdplus()
@@ -1128,7 +1128,7 @@ class Reach(object):
             pts_df = self.reach_points_as_dataframe
             putin_fs = pts_df[
                 (pts_df['point_type'] == 'access') & (pts_df['subtype'] == 'putin')
-            ].spatial.to_featureset()
+                ].spatial.to_featureset()
 
             # use the feature set to get a response from the watershed function using Esri's Hydrology service
             wtrshd_resp = hydrology.watershed(
@@ -1156,69 +1156,70 @@ class Reach(object):
         else:
             nhd_status = True
 
-        if nhd_status == True:
+        # initialize trace_status to False first
+        trace_status = False
 
-            # try to trace a few times using WATERS, but if it doesn't work, error and report
+        if nhd_status:
+
+            # try to trace a few times using WATERS, but if it doesn't work, bingo to Esri Hydrology
             attempts = 0
             max_attempts = 5
 
-            try:
+            while attempts < max_attempts:
 
-                # use the EPA navigate service to trace downstream
-                waters = WATERS()
-                trace_polyline = waters.get_downstream_navigation_polyline(self.putin.nhdplus_reach_id,
-                                                                           self.putin.nhdplus_measure)
+                try:
 
-                # project the takeout geometry to the same spatial reference as the trace polyline
-                takeout_geom = self.takeout.geometry.match_spatial_reference(self.takeout.geometry)
+                    # use the EPA navigate service to trace downstream
+                    waters = WATERS()
+                    trace_polyline = waters.get_downstream_navigation_polyline(self.putin.nhdplus_reach_id,
+                                                                               self.putin.nhdplus_measure)
 
-                # snap the takeout geometry to the hydroline
-                takeout_geom = takeout_geom.snap_to_line(trace_polyline)
+                    # project the takeout geometry to the same spatial reference as the trace polyline
+                    takeout_geom = self.takeout.geometry.match_spatial_reference(self.takeout.geometry)
 
-                # update the takeout to the snapped point
-                self.takeout.set_geometry(takeout_geom)
+                    # snap the takeout geometry to the hydroline
+                    takeout_geom = takeout_geom.snap_to_line(trace_polyline)
 
-                # now dial in the coordinates using the EPA service - getting the rest of the attributes
-                self.takeout.snap_to_nhdplus()
+                    # update the takeout to the snapped point
+                    self.takeout.set_geometry(takeout_geom)
 
-                # ensure a takeout was actually found
-                if self.takeout.nhdplus_measure is None or self.takeout.nhdplus_reach_id is None:
-                    self.error = True
-                    self.notes = 'Takeout could not be located using EPS\'s WATERS service'
-                    status = False
+                    # now dial in the coordinates using the EPA service - getting the rest of the attributes
+                    self.takeout.snap_to_nhdplus()
 
-                # get the geometry between the putin and takeout
-                self._geometry = waters.get_updown_ptp_polyline(self.putin.nhdplus_reach_id,
-                                                                self.putin.nhdplus_measure,
-                                                                self.takeout.nhdplus_reach_id,
-                                                                self.takeout.nhdplus_measure)
+                    # ensure a takeout was actually found
+                    if self.takeout.nhdplus_measure is None or self.takeout.nhdplus_reach_id is None:
+                        self.error = True
+                        self.notes = 'Takeout could not be located using EPS\'s WATERS service'
+                        trace_status = False
 
                 status = True
                 self.tracing_method = 'EPA WATERS NHD Plus v2'
 
-            except:
+                    trace_status = True
+                    break
 
-                # increment the attempt counter
-                attempts += 1
+                except:
 
-                # if tried too many times
-                if attempts == max_attempts:
-                    self.error = True
-                    self.notes = 'The reach could not be traced using the EPA\'s WATERS service.'
-                    status = False
+                    # increment the attempt counter
+                    attempts += 1
 
-        # if the put-in appears to be outside the area capable of being located using WATERS
-        else:
+        # if the put-in has not yet been located using the WATERS service
+        if not trace_status:
 
             # do a little voodoo to get a feature set contining just the put-in
             pts_df = self.reach_points_as_dataframe
             putin_fs = pts_df[
                 (pts_df['point_type'] == 'access') & (pts_df['subtype'] == 'putin')
-            ].spatial.to_featureset()
+                ].spatial.to_featureset()
 
             # trace using Esri Hydrology services
             attempts = 10
             fail_count = 0
+
+            # set variable for tracking the trace response
+            trace_resp = None
+
+            # try to get a trace response
             while fail_count < attempts:
                 try:
                     trace_resp = hydrology.trace_downstream(putin_fs, point_id_field='reach_id')
@@ -1226,16 +1227,13 @@ class Reach(object):
                 except:
                     fail_count = fail_count + 1
 
-            # extract out the trace geometry
-            trace_geom = trace_resp.features[0].geometry
-            trace_geom['spatialReference'] = trace_resp.spatial_reference
-            trace_geom = Geometry(trace_geom)
+            # if the trace was successful
+            if trace_resp:
 
-            # snap the takeout to the line
-            takeout = self.takeout
-            snap_geom = takeout.geometry.snap_to_line(trace_geom)
-            takeout.set_geometry(snap_geom)
-            self.set_takeout(takeout)
+                # extract out the trace geometry
+                trace_geom = trace_resp.features[0].geometry
+                trace_geom['spatialReference'] = trace_resp.spatial_reference
+                trace_geom = Geometry(trace_geom)
 
             # trim the reach line to the takeout
             line_geom = trace_geom.trim_at_point(takeout.geometry)
@@ -1246,11 +1244,18 @@ class Reach(object):
             status = True
             self.tracing_method = "ArcGIS Online Hydrology Services"
 
+                trace_status = True
+
+        # if neither of those worked, flag the error
+        if not trace_status:
+            self.error = True
+            self.notes = "The reach could not be trace with neither the EPA's WATERS service nor the Esri Hydrology services."
+
         # if map result desired, return it
         if webmap:
             return self.plot_map()
         else:
-            return status
+            return trace_status
 
     @property
     def geometry(self):
@@ -1264,13 +1269,13 @@ class Reach(object):
         """helper function for exporting features"""
         srs = pd.Series(dir(self))
         srs = srs[
-                (~srs.str.startswith('_'))
-                & (~srs.str.contains('as_'))
-                & (srs != 'putin')
-                & (srs != 'takeout')
-                & (srs != 'intermediate_accesses')
-                & (srs != 'geometry')
-                & (srs != 'has_a_point')
+            (~srs.str.startswith('_'))
+            & (~srs.str.contains('as_'))
+            & (srs != 'putin')
+            & (srs != 'takeout')
+            & (srs != 'intermediate_accesses')
+            & (srs != 'geometry')
+            & (srs != 'has_a_point')
             ]
         srs = srs[srs.apply(lambda p: not hasattr(getattr(self, p), '__call__'))]
         return {key: getattr(self, key) for key in srs}
@@ -1578,7 +1583,6 @@ class _ReachIdFeatureLayer(FeatureLayer):
 
         # if there are features
         if len(oid_list):
-
             # convert the list to a comma separated string
             oid_deletes = ','.join([str(v) for v in oid_list])
 
@@ -1700,7 +1704,7 @@ class ReachFeatureLayer(_ReachIdFeatureLayer):
     def update_reach(self, reach):
 
         # get oid of records matching reach_id
-        oid_lst = self.query(f"reach_id = '{reach.reach_id}'",  return_ids_only=True)['objectIds']
+        oid_lst = self.query(f"reach_id = '{reach.reach_id}'", return_ids_only=True)['objectIds']
 
         # if a feature already exists - hopefully the case, get the oid, add it to the feature, and push it
         if len(oid_lst) > 0:
