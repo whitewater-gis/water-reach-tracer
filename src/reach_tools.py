@@ -1191,12 +1191,11 @@ class Reach(object):
                         self.error = True
                         self.notes = 'Takeout could not be located using EPS\'s WATERS service'
                         trace_status = False
-
-                status = True
-                self.tracing_method = 'EPA WATERS NHD Plus v2'
-
-                    trace_status = True
-                    break
+                        
+                    else:
+                        trace_status = True
+                        self.tracing_method = 'EPA WATERS NHD Plus v2'
+                        break
 
                 except:
 
@@ -1241,10 +1240,8 @@ class Reach(object):
             # smooth the geometry since the hydrology tracing can appear a little jagged
             self._geometry = _smooth_geometry(line_geom)
 
-            status = True
+            trace_status = True
             self.tracing_method = "ArcGIS Online Hydrology Services"
-
-                trace_status = True
 
         # if neither of those worked, flag the error
         if not trace_status:
