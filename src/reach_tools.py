@@ -31,6 +31,7 @@ import shapely.ops
 import shapely.geometry
 import inspect
 from html.parser import HTMLParser
+import json
 
 # overcoming challenges of python 3.x relative imports
 try:
@@ -66,52 +67,81 @@ def _strip_tags(html):
 
 
 # smoothing function for geometry
-def _smooth_geometry(geom):
+def _smooth_geometry(geom, gis=None):
 
     if not isinstance(geom, Polygon) and not isinstance(geom, Polyline):
         raise Exception('Smoothing can only be performed on Esri Polygon or Polyline geometry types.')
 
-    if not active_gis:
-        raise Exception('There must be an active GIS session for geometry smoothing to work.')
-    else:
+    # get a GIS instance to have a geometry service to resolve to
+    if not gis and active_gis:
         gis = active_gis
+    elif not gis and not active_gis:
+        raise Exception('an active GIS or explicitly defined GIS is required to smooth geometry')
+
+    def _make_geometry_request(in_geom, url_extension, params):
+
+        # create the url for making the
+        url = f'{gis.properties.helperServices.geometry.url}/{url_extension}'
+
+        # make a copy to not modify the original
+        geom = deepcopy(in_geom)
+
+        # get the key for the geometry coordinates
+        geom_key = list(geom.keys())[0]
+
+        params['geometries'] = {
+            'geometryType': 'esriGeometryPolyline',
+            'geometries': [
+                {geom_key: geom[geom_key]}
+            ]
+        }
+
+        # convert all dict or list params not at the top level of the dictionary to strings
+        payload = {k: json.dumps(v) if isinstance(v, (dict, list)) else v for k, v in params.items()}
+
+        attempts = 0
+        status = None
+
+        while attempts < 5 and status != 200:
+
+            try:
+
+                # make the post request
+                resp = requests.post(url, payload)
+
+                # extract out the result from the request and patch into the original geometry object
+                geom[geom_key] = resp.json()['geometries'][0][geom_key]
+
+                status = resp.status_code
+
+            except:
+
+                attempts = attempts + 1
+
+        # return the modified geometry object
+        return geom
 
     def densify(in_geom):
-        url = gis.properties.helperServices.geometry.url + '/densify'
-        geom = deepcopy(in_geom)
-        geom_key = list(geom.keys())[0]
+
+        # construct the request parameter dictionary less the geometries
         params = {
             'f': 'json',
-            'geometries': {
-                'geometryType': 'esriGeometryPolyline',
-                'geometries': [
-                    {geom_key: geom[geom_key]}
-                ]
-            },
             'sr': {'wkid': 4326},
             'maxSegmentLength': 0.009
         }
-        resp = gis._con.post(url, params)
-        geom[geom_key] = resp['geometries'][0][geom_key]
-        return geom
+
+        # return the densified geometry object
+        return _make_geometry_request(in_geom, 'densify', params)
 
     def simplify(in_geom):
-        url = gis.properties.helperServices.geometry.url + '/simplify'
-        geom = deepcopy(in_geom)
-        geom_key = list(geom.keys())[0]
+
+        # construct the request parameter dictionary less the geometries
         params = {
             'f': 'json',
-            'geometries': {
-                'geometryType': 'esriGeometryPolyline',
-                'geometries': [
-                    {geom_key: geom[geom_key]}
-                ]
-            },
             'sr': {'wkid': 4326}
         }
-        resp = gis._con.post(url, params)
-        geom[geom_key] = resp['geometries'][0][geom_key]
-        return geom
+
+        return _make_geometry_request(in_geom, 'simplify', params)
 
     def smooth_coord_lst(coord_lst):
         x_lst, y_lst = zip(*coord_lst)
@@ -1106,147 +1136,150 @@ class Reach(object):
         :param gis: Active GIS for performing hydrology analysis.
         :return:
         """
-        # set the active GIS to the gis object if no other is provided
-        if not gis:
-            gis = active_gis
-
         # ensure a putin and takeout actually were found
         if self.putin is None or self.takeout is None:
             self.error = True
             self.notes = 'Reach does not appear to have both a put-in and take-out location defined.'
             trace_status = False
 
-        # get the snapped and corrected reach locations for the put-in
-        self.putin.snap_to_nhdplus()
-
-        # ensure a putin was actually found using the EPA's WATERS service
-        if self.putin.nhdplus_measure is None or self.putin.nhdplus_reach_id is None:
-
-            nhd_status = False
-
-            # do a little voodoo to get a feature set containing just the put-in
-            pts_df = self.reach_points_as_dataframe
-            putin_fs = pts_df[
-                (pts_df['point_type'] == 'access') & (pts_df['subtype'] == 'putin')
-                ].spatial.to_featureset()
-
-            # use the feature set to get a response from the watershed function using Esri's Hydrology service
-            wtrshd_resp = hydrology.watershed(
-                input_points=putin_fs,
-                point_id_field='reach_id',
-                snap_distance=100,
-                snap_distance_units='Meters',
-                gis=gis
-            )
-
-            # update the putin if a point was found
-            if len(wtrshd_resp._fields) and len(wtrshd_resp.snapped_points.features):
-                putin = self.putin
-                putin_geometry = wtrshd_resp.snapped_points.features[0].geometry
-                putin_geometry['spatialReference'] = wtrshd_resp.snapped_points.spatial_reference
-                putin.set_geometry(Geometry(putin_geometry))
-                self.set_putin(putin)
-
-            # if a putin was not found, quit swimming in the ocean
-            else:
-                self.error = True
-                self.notes = 'Put-in could not be located with neither WATERS nor Esri Hydrology services.'
-
-        # if the put-in was located using WATERS, flag as successful
+        # if there is something to work with, keep going
         else:
-            nhd_status = True
 
-        # initialize trace_status to False first
-        trace_status = False
+            # get the snapped and corrected reach locations for the put-in
+            self.putin.snap_to_nhdplus()
 
-        if nhd_status:
+            # if a put-in was not located using the WATERS service, flag
+            if self.putin.nhdplus_measure is None or self.putin.nhdplus_reach_id is None:
+                nhd_status = False
 
-            # try to trace a few times using WATERS, but if it doesn't work, bingo to Esri Hydrology
-            attempts = 0
-            max_attempts = 5
+            # if the put-in was located using WATERS, flag as successful
+            else:
+                nhd_status = True
 
-            while attempts < max_attempts:
+            # initialize trace_status to False first
+            trace_status = False
 
-                try:
+            if nhd_status:
 
-                    # use the EPA navigate service to trace downstream
-                    waters = WATERS()
-                    trace_polyline = waters.get_downstream_navigation_polyline(self.putin.nhdplus_reach_id,
-                                                                               self.putin.nhdplus_measure)
+                # try to trace a few times using WATERS, but if it doesn't work, bingo to Esri Hydrology
+                attempts = 0
+                max_attempts = 5
 
-                    # project the takeout geometry to the same spatial reference as the trace polyline
-                    takeout_geom = self.takeout.geometry.match_spatial_reference(self.takeout.geometry)
+                while attempts < max_attempts:
 
-                    # snap the takeout geometry to the hydroline
-                    takeout_geom = takeout_geom.snap_to_line(trace_polyline)
+                    try:
 
-                    # update the takeout to the snapped point
+                        # use the EPA navigate service to trace downstream
+                        waters = WATERS()
+                        trace_polyline = waters.get_downstream_navigation_polyline(self.putin.nhdplus_reach_id,
+                                                                                   self.putin.nhdplus_measure)
+
+                        # project the takeout geometry to the same spatial reference as the trace polyline
+                        takeout_geom = self.takeout.geometry.match_spatial_reference(self.takeout.geometry)
+
+                        # snap the takeout geometry to the hydroline
+                        takeout_geom = takeout_geom.snap_to_line(trace_polyline)
+
+                        # update the takeout to the snapped point
+                        self.takeout.set_geometry(takeout_geom)
+
+                        # now dial in the coordinates using the EPA service - getting the rest of the attributes
+                        self.takeout.snap_to_nhdplus()
+
+                        # ensure a takeout was actually found
+                        if self.takeout.nhdplus_measure is None or self.takeout.nhdplus_reach_id is None:
+                            self.error = True
+                            self.notes = 'Takeout could not be located using EPS\'s WATERS service'
+                            trace_status = False
+
+                        else:
+                            trace_status = True
+                            self.tracing_method = 'EPA WATERS NHD Plus v2'
+                            break
+
+                    except:
+
+                        # increment the attempt counter
+                        attempts += 1
+
+            # if the put-in has not yet been located using the WATERS service
+            if not trace_status:
+
+                # do a little voodoo to get a feature set containing just the put-in
+                pts_df = self.reach_points_as_dataframe
+                putin_fs = pts_df[
+                    (pts_df['point_type'] == 'access') & (pts_df['subtype'] == 'putin')
+                    ].spatial.to_featureset()
+
+                # use the feature set to get a response from the watershed function using Esri's Hydrology service
+                wtrshd_resp = hydrology.watershed(
+                    input_points=putin_fs,
+                    point_id_field='reach_id',
+                    snap_distance=100,
+                    snap_distance_units='Meters',
+                    gis=gis
+                )
+
+                # update the putin if a point was found using the watershed function
+                if len(wtrshd_resp._fields) and len(wtrshd_resp.snapped_points.features):
+                    putin = self.putin
+                    putin_geometry = wtrshd_resp.snapped_points.features[0].geometry
+                    putin_geometry['spatialReference'] = wtrshd_resp.snapped_points.spatial_reference
+                    putin.set_geometry(Geometry(putin_geometry))
+                    self.set_putin(putin)
+
+                # if a putin was not found, quit swimming in the ocean
+                else:
+                    self.error = True
+                    self.notes = 'Put-in could not be located with neither WATERS nor Esri Hydrology services.'
+
+                # trace using Esri Hydrology services
+                attempts = 10
+                fail_count = 0
+
+                # set variable for tracking the trace response
+                trace_resp = None
+
+                # try to get a trace response
+                while fail_count < attempts:
+                    try:
+                        trace_resp = hydrology.trace_downstream(putin_fs, point_id_field='reach_id', gis=gis)
+                        break
+                    except:
+                        fail_count = fail_count + 1
+
+                # if the trace was successful
+                if trace_resp and not self.error:
+
+                    # extract out the trace geometry
+                    trace_geom = trace_resp.features[0].geometry
+                    trace_geom['spatialReference'] = trace_resp.spatial_reference
+                    trace_geom = Geometry(trace_geom)
+
+                    # snap the takeout to the traced line
+                    takeout_geom = self.takeout.geometry.snap_to_line(trace_geom)
                     self.takeout.set_geometry(takeout_geom)
 
-                    # now dial in the coordinates using the EPA service - getting the rest of the attributes
-                    self.takeout.snap_to_nhdplus()
+                    # trim the reach line to the takeout
+                    line_geom = trace_geom.trim_at_point(self.takeout.geometry)
 
-                    # ensure a takeout was actually found
-                    if self.takeout.nhdplus_measure is None or self.takeout.nhdplus_reach_id is None:
-                        self.error = True
-                        self.notes = 'Takeout could not be located using EPS\'s WATERS service'
-                        trace_status = False
-                        
+                    # ensure there are more than two verticies for smoothing
+                    if line_geom.coordinates().size > 6:
+
+                        # smooth the geometry since the hydrology tracing can appear a little jagged
+                        self._geometry = _smooth_geometry(line_geom)
+
                     else:
-                        trace_status = True
-                        self.tracing_method = 'EPA WATERS NHD Plus v2'
-                        break
+                        self._geometry = line_geom
 
-                except:
+                    trace_status = True
+                    self.tracing_method = "ArcGIS Online Hydrology Services"
 
-                    # increment the attempt counter
-                    attempts += 1
-
-        # if the put-in has not yet been located using the WATERS service
-        if not trace_status:
-
-            # do a little voodoo to get a feature set contining just the put-in
-            pts_df = self.reach_points_as_dataframe
-            putin_fs = pts_df[
-                (pts_df['point_type'] == 'access') & (pts_df['subtype'] == 'putin')
-                ].spatial.to_featureset()
-
-            # trace using Esri Hydrology services
-            attempts = 10
-            fail_count = 0
-
-            # set variable for tracking the trace response
-            trace_resp = None
-
-            # try to get a trace response
-            while fail_count < attempts:
-                try:
-                    trace_resp = hydrology.trace_downstream(putin_fs, point_id_field='reach_id')
-                    break
-                except:
-                    fail_count = fail_count + 1
-
-            # if the trace was successful
-            if trace_resp:
-
-                # extract out the trace geometry
-                trace_geom = trace_resp.features[0].geometry
-                trace_geom['spatialReference'] = trace_resp.spatial_reference
-                trace_geom = Geometry(trace_geom)
-
-            # trim the reach line to the takeout
-            line_geom = trace_geom.trim_at_point(takeout.geometry)
-
-            # smooth the geometry since the hydrology tracing can appear a little jagged
-            self._geometry = _smooth_geometry(line_geom)
-
-            trace_status = True
-            self.tracing_method = "ArcGIS Online Hydrology Services"
-
-        # if neither of those worked, flag the error
-        if not trace_status:
-            self.error = True
-            self.notes = "The reach could not be trace with neither the EPA's WATERS service nor the Esri Hydrology services."
+            # if neither of those worked, flag the error
+            if not trace_status:
+                self.error = True
+                self.notes = "The reach could not be trace with neither the EPA's WATERS service nor the Esri " \
+                             "Hydrology services."
 
         # if map result desired, return it
         if webmap:

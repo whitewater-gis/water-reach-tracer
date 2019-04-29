@@ -4,20 +4,20 @@ import pandas as pd
 from arcgis.gis import GIS, Item
 import os
 
-from dotenv import load_dotenv, find_dotenv
-load_dotenv(find_dotenv())
-
 from src.reach_tools import *
 import src.hydrology as hydrology
 
-gis = GIS(username=os.getenv('ARCGIS_USERNAME'), password=os.getenv('ARCGIS_PASSWORD'))
-url_reach_line = os.getenv('URL_REACH_LINE')
-url_reach_centroid = os.getenv('URL_REACH_CENTROID')
-url_reach_points = os.getenv('URL_REACH_POINT')
+import config
 
-lyr_reach_line = ReachFeatureLayer(url_reach_line, gis)
-lyr_reach_centroid = ReachFeatureLayer(url_reach_centroid, gis)
-lyr_reach_points = ReachPointFeatureLayer(url_reach_points, gis)
+gis = GIS(username=config.arcgis_username, password=config.arcgis_password)
+
+url_reach_line = config.url_reach_line
+url_reach_centroid = config.url_reach_centroid
+url_reach_points = config.url_reach_points
+
+lyr_line = ReachFeatureLayer(url_reach_line, gis)
+lyr_centroid = ReachFeatureLayer(url_reach_centroid, gis)
+lyr_points = ReachPointFeatureLayer(url_reach_points, gis)
 
 class ReachLDub(unittest.TestCase):
     reach_id = 2156
@@ -269,7 +269,7 @@ class HydrologyUnitTest(unittest.TestCase):
 class TestFault(unittest.TestCase):
 
     def test_run_reach(self):
-        reach_id = 153
+        reach_id = 4
         reach = Reach.get_from_aw(reach_id)
         reach.snap_putin_and_takeout_and_trace()
         self.assertTrue(reach)
