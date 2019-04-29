@@ -269,10 +269,12 @@ class HydrologyUnitTest(unittest.TestCase):
 class TestFault(unittest.TestCase):
 
     def test_run_reach(self):
-        reach_id = 4
+        gis = GIS(username=config.arcgis_username, password=config.arcgis_password)
+        reach_id = 1
         reach = Reach.get_from_aw(reach_id)
-        reach.snap_putin_and_takeout_and_trace()
-        self.assertTrue(reach)
+        reach.snap_putin_and_takeout_and_trace(gis=gis)
+        feature = reach.as_feature
+        self.assertTrue(feature)
 
 if __name__ == '__main__':
     unittest.main()

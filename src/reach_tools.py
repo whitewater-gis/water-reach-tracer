@@ -67,7 +67,7 @@ def _strip_tags(html):
 
 
 # smoothing function for geometry
-def _smooth_geometry(geom, gis=None):
+def _smooth_geometry(geom, densify_max_segment_length=0.009, gis=None):
 
     if not isinstance(geom, Polygon) and not isinstance(geom, Polyline):
         raise Exception('Smoothing can only be performed on Esri Polygon or Polyline geometry types.')
@@ -127,7 +127,7 @@ def _smooth_geometry(geom, gis=None):
         params = {
             'f': 'json',
             'sr': {'wkid': 4326},
-            'maxSegmentLength': 0.009
+            'maxSegmentLength': densify_max_segment_length
         }
 
         # return the densified geometry object
@@ -640,6 +640,9 @@ class Reach(object):
 
         low_metrics = get_metrics(metric_keys[:6])
         high_metrics = get_metrics(metric_keys[5:])
+
+        if not self.gauge_observation:
+            return 'no gauge reading'
 
         if self.gauge_observation < metrics[0]:
             return 'too low'
@@ -1256,6 +1259,9 @@ class Reach(object):
                     trace_geom['spatialReference'] = trace_resp.spatial_reference
                     trace_geom = Geometry(trace_geom)
 
+                    # save the resolution for the smoothing later
+                    trace_data_resolution = float(trace_resp.features[0].attributes['DataResolution'])
+
                     # snap the takeout to the traced line
                     takeout_geom = self.takeout.geometry.snap_to_line(trace_geom)
                     self.takeout.set_geometry(takeout_geom)
@@ -1263,11 +1269,13 @@ class Reach(object):
                     # trim the reach line to the takeout
                     line_geom = trace_geom.trim_at_point(self.takeout.geometry)
 
-                    # ensure there are more than two verticies for smoothing
+                    # ensure there are more than two vertices for smoothing
                     if line_geom.coordinates().size > 6:
 
                         # smooth the geometry since the hydrology tracing can appear a little jagged
-                        self._geometry = _smooth_geometry(line_geom)
+                        self._geometry = _smooth_geometry(line_geom,
+                                                          densify_max_segment_length=trace_data_resolution * 2,
+                                                          gis=gis)
 
                     else:
                         self._geometry = line_geom
