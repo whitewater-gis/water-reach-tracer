@@ -3,16 +3,16 @@
   "tasks": [
     {
       "type": "func",
-      "command": "host start",
-      "problemMatcher": "$func-watch",
-      "isBackground": true,
-      "dependsOn": "func: extensions install"
-    },
-    {
-      "type": "func",
       "command": "extensions install",
       "dependsOn": "pipInstall",
       "problemMatcher": []
+    },
+    {
+      "type": "func",
+      "command": "host start",
+      "problemMatcher": "$func-watch",
+      "isBackground": true,
+      "dependsOn": "pipInstall"
     },
     {
       "label": "pipInstall",

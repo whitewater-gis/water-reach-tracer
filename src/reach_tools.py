@@ -73,10 +73,10 @@ def _smooth_geometry(geom, densify_max_segment_length=0.009, gis=None):
         raise Exception('Smoothing can only be performed on Esri Polygon or Polyline geometry types.')
 
     # get a GIS instance to have a geometry service to resolve to
-    if not gis and active_gis:
+    if gis is None and active_gis:
         gis = active_gis
-    elif not gis and not active_gis:
-        raise Exception('an active GIS or explicitly defined GIS is required to smooth geometry')
+    elif gis is None and active_gis is None:
+        raise Exception('An active GIS or explicitly defined GIS is required to smooth geometry.')
 
     def _make_geometry_request(in_geom, url_extension, params):
 
