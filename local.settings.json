@@ -1,8 +1,12 @@
 {
   "IsEncrypted": false,
   "Values": {
-    "AzureWebJobsStorage": "DefaultEndpointsProtocol=https;AccountName=whitewaterstor;AccountKey=KGSpleClj9AXohX0/uuYCe94cmwExJqfO0nUML7Ijb2eaWqcX1vRfws0+JiJQK+IpSkslWiznznXxoSrhM+yyg==;EndpointSuffix=core.windows.net",
+    "AzureWebJobsStorage": "DefaultEndpointsProtocol=https;AccountName=reachtools;AccountKey=ckulXMg+6xb0lh18szexfnuGnbHEWauYoNW3MKsFie3WgNWcYMrRK0Uy3o63z9U4SUCYSlxXCB4JBs1kTUeKAg==;EndpointSuffix=core.windows.net",
     "FUNCTIONS_WORKER_RUNTIME": "python",
-    "whitewaterstor_STORAGE": "DefaultEndpointsProtocol=https;AccountName=whitewaterstor;AccountKey=KGSpleClj9AXohX0/uuYCe94cmwExJqfO0nUML7Ijb2eaWqcX1vRfws0+JiJQK+IpSkslWiznznXxoSrhM+yyg==;EndpointSuffix=core.windows.net"
+    "STORAGE_CONNECTION_STRING": "DefaultEndpointsProtocol=https;AccountName=reachtools;AccountKey=ckulXMg+6xb0lh18szexfnuGnbHEWauYoNW3MKsFie3WgNWcYMrRK0Uy3o63z9U4SUCYSlxXCB4JBs1kTUeKAg==;EndpointSuffix=core.windows.net",
+    "FUNCTIONS_EXTENSION_VERSION": "~2",
+    "WEBSITE_NODE_DEFAULT_VERSION": "8.11.1",
+    "APPINSIGHTS_INSTRUMENTATIONKEY": "995cd109-ec8d-43fa-be81-b720c98f2165",
+    "WEBSITE_RUN_FROM_PACKAGE": "https://reachtools.blob.core.windows.net/function-releases/20190509233741-6a14c140-bbea-4234-aaac-37163450b611.zip?sv=2018-03-28&sr=b&sig=RlPD00dl7nRA1aUwi1XmXzcY6e%2BthAKu8xuhe9Gt6X0%3D&st=2019-05-09T23%3A34%3A07Z&se=2029-05-09T23%3A39%3A07Z&sp=r"
   }
 }

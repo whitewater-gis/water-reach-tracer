@@ -2,7 +2,7 @@
   "azureFunctions.projectRuntime": "~2",
   "azureFunctions.projectLanguage": "Python",
   "azureFunctions.deploySubpath": "water-reach-tracer.zip",
-  "azureFunctions.preDeployTask": "func: pack",
+  "azureFunctions.preDeployTask": "func: pack --build-native-deps",
   "files.exclude": {
     "obj": true,
     "bin": true

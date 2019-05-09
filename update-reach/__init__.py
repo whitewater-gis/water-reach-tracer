@@ -13,7 +13,7 @@ def main(msg: func.QueueMessage) -> None:
     logging.info(f'Connected to GIS at {gis.url}.')
 
     # since the input message content is a single feature, extract the reach id from the feature
-    feature_json = json.loads(msg.content)
+    feature_json = json.loads(msg.get_body())
     reach_id = feature_json['attributes']['reach_id']
     logging.info(f'Preparing to update reach id {reach_id}.')
 
