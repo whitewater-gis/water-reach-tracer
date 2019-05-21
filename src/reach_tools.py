@@ -1762,3 +1762,34 @@ class ReachFeatureLayer(_ReachIdFeatureLayer):
             resp = self.add_reach(reach)
 
         return resp
+
+    def update_reach_attributes_only(self, reach):
+
+        # get oid of records matching reach_id
+        oid_lst = self.query(f"reach_id = '{reach.reach_id}'", return_ids_only=True)['objectIds']
+
+        # if a feature already exists - hopefully the case, get the oid, add it to the feature, and push it
+        if len(oid_lst) > 0:
+
+            # check the geometry type of the target feature service - point or line
+            if self.properties.geometryType == 'esriGeometryPoint':
+                update_feat = reach.as_centroid_feature
+
+            elif self.properties.geometryType == 'esriGeometryPolyline':
+                update_feat = reach.as_feature
+
+            # remove any of the geographic properties from the feature
+            for attr in ['putin_x', 'putin_y', 'takeout_x', 'takeout_y', 'extent', 'centroid']:
+                del (update_feat.attributes[attr])
+            update_feat = Feature(attributes=update_feat.attributes)  # gets rid of geometry
+
+            update_feat.attributes['OBJECTID'] = oid_lst[0]
+
+            # push the update
+            resp = self.edit_features(updates=[update_feat])
+
+            return resp
+
+        else:
+
+            return False
