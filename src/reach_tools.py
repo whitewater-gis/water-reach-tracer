@@ -1402,6 +1402,33 @@ class Reach(object):
         else:
             return False
 
+    def publish_attribute_updates_only(self, reach_line_layer, reach_centroid_layer):
+        """
+        Based on the current status of the reach, push updates to the online Feature Services only for attributes.
+        :param reach_line_layer: ReachLayer with line geometry to publish to.
+        :param reach_centroid_layer: ReachLayer with point geometry for the centroid to publish to.
+        :return: Boolean True if successful and False if not
+        """
+        resp_line = reach_line_layer.update_reach(self)
+        if resp_line:
+            update_line = len(resp_line['updateResults'])
+        else:
+            update_line = False
+
+        resp_centroid = reach_centroid_layer.update_reach(self)
+        if resp_centroid:
+            update_centroid = len(resp_centroid['updateResults'])
+        else:
+            update_centroid = False
+
+        # check results for adds and return correct response
+        if update_line and update_centroid:
+            return True
+        elif update_centroid:
+            return True
+        else:
+            return False
+
     def plot_map(self, gis=None):
         """
         Display reach and accesses on web map widget.
