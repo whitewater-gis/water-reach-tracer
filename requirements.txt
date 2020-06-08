@@ -1,5 +1,5 @@
 appnope==0.1.0
-arcgis==1.6.0
+arcgis==1.8.0
 asn1crypto==0.24.0
 astroid==2.2.5
 attrs==19.1.0
